@@ -200,6 +200,194 @@ _haptic.release = () => {
 
 const haptic = _haptic;
 
+// --- ЧАСТИЧНАЯ СИСТЕМА ---
+class ParticleSystem {
+    constructor() {
+        this.canvas = document.getElementById('particles-canvas');
+        this.ctx = null;
+        this.particles = [];
+        this.landingParticles = [];
+        
+        if (this.canvas) {
+            this.ctx = this.canvas.getContext('2d');
+            this.resizeCanvas();
+            this.animate();
+            
+            window.addEventListener('resize', () => this.resizeCanvas());
+        }
+    }
+    
+    resizeCanvas() {
+        if (!this.canvas) return;
+        
+        // Размеры подстраиваются под контейнер доски
+        const boardContainer = document.querySelector('.board-container');
+        const boardRect = boardContainer.getBoundingClientRect();
+        
+        // Устанавливаем размеры canvas
+        this.canvas.width = boardRect.width;
+        this.canvas.height = boardRect.height;
+        
+        // Позиционируем canvas внутри board-container
+        this.canvas.style.position = 'absolute';
+        this.canvas.style.top = '0';
+        this.canvas.style.left = '0';
+    }
+    
+    createParticles(x, y, colorStr, particleSize = 14, count = 7) {
+        if (!this.ctx) return;
+        
+        const pal = BLOCK_PALETTES[colorStr] || BLOCK_PALETTES[COLORS.purple];
+        const color = pal.base;
+        
+        // Адаптируем количество частиц под мобильные устройства
+        const particleCount = window.innerWidth <= 768 ? Math.floor(count * 0.6) : count;
+        
+        for (let i = 0; i < particleCount; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * 60 + 30;
+            const tx = Math.cos(angle) * distance;
+            const ty = Math.sin(angle) * distance;
+            const rot = Math.random() * 360;
+            
+            // Получаем относительные координаты в системе координат canvas
+            const boardContainer = document.querySelector('.board-container');
+            const boardRect = boardContainer.getBoundingClientRect();
+            const relX = x - boardRect.left;
+            const relY = y - boardRect.top;
+            
+            this.particles.push({
+                x: relX,
+                y: relY,
+                color: color,
+                size: particleSize,
+                tx: tx,
+                ty: ty,
+                rot: rot,
+                life: 0.5,
+                startLife: 0.5,
+                type: 'explosion'
+            });
+        }
+    }
+    
+    createLandingParticles(x, y, colorStr) {
+        if (!this.ctx) return;
+        
+        const pal = BLOCK_PALETTES[colorStr] || BLOCK_PALETTES[COLORS.purple];
+        const color = pal.base;
+        
+        // Уменьшенное количество частиц приземления
+        for (let i = 0; i < 2; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * 40 + 10;
+            const tx = Math.cos(angle) * distance;
+            const ty = Math.sin(angle) * distance;
+            
+            // Получаем относительные координаты в системе координат canvas
+            const boardContainer = document.querySelector('.board-container');
+            const boardRect = boardContainer.getBoundingClientRect();
+            const relX = x - boardRect.left;
+            const relY = y - boardRect.top;
+            
+            this.landingParticles.push({
+                x: relX,
+                y: relY,
+                color: color,
+                size: 12,
+                opacity: 0.3,
+                tx: tx,
+                ty: ty,
+                life: 0.6,
+                startLife: 0.6,
+                type: 'landing'
+            });
+        }
+    }
+    
+    update() {
+        // Обновляем обычные частицы
+        this.particles = this.particles.filter(particle => {
+            particle.life -= 1/60; // приблизительно 60fps
+            return particle.life > 0;
+        });
+        
+        // Обновляем частицы приземления
+        this.landingParticles = this.landingParticles.filter(particle => {
+            particle.life -= 1/60; // приблизительно 60fps
+            return particle.life > 0;
+        });
+    }
+    
+    render() {
+        if (!this.ctx) return;
+        
+        // Очищаем область для перерисовки
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Рисуем обычные частицы
+        this.particles.forEach(particle => {
+            const progress = 1 - (particle.life / particle.startLife);
+            const currentSize = particle.size * (1 - progress);
+            const currentOpacity = Math.min(1, particle.life / particle.startLife);
+            
+            this.ctx.save();
+            this.ctx.globalAlpha = currentOpacity;
+            this.ctx.fillStyle = particle.color;
+            this.ctx.shadowColor = particle.color;
+            this.ctx.shadowBlur = 6;
+            this.ctx.beginPath();
+            this.ctx.arc(
+                particle.x + particle.tx * progress,
+                particle.y + particle.ty * progress,
+                currentSize / 2,
+                0,
+                Math.PI * 2
+            );
+            this.ctx.fill();
+            this.ctx.restore();
+        });
+        
+        // Рисуем частицы приземления
+        this.landingParticles.forEach(particle => {
+            const progress = 1 - (particle.life / particle.startLife);
+            const scale = 0.5 + progress * 1.5; // увеличивается от 0.5 до 2.0
+            const currentSize = particle.size * scale;
+            const currentOpacity = particle.opacity * (1 - progress);
+            
+            this.ctx.save();
+            this.ctx.globalAlpha = currentOpacity;
+            this.ctx.fillStyle = particle.color;
+            this.ctx.beginPath();
+            this.ctx.arc(
+                particle.x + particle.tx * progress,
+                particle.y + particle.ty * progress,
+                currentSize / 2,
+                0,
+                Math.PI * 2
+            );
+            this.ctx.fill();
+            this.ctx.restore();
+        });
+    }
+    
+    animate() {
+        this.update();
+        this.render();
+        requestAnimationFrame(() => this.animate());
+    }
+}
+
+let particleSystem = null;
+// Инициализируем систему частиц после полной загрузки страницы
+if (document.readyState === 'complete') {
+    particleSystem = new ParticleSystem();
+} else {
+    window.addEventListener('load', () => {
+        particleSystem = new ParticleSystem();
+    });
+}
+
 // --- НАСТРОЙКИ И ДАННЫЕ ---
 const BOARD_SIZE = 8;
 const BEST_SCORE_KEY = 'block-chpok-best-score';
@@ -1387,62 +1575,13 @@ function createPraisePopup(text) {
 }
 
 function createParticles(x, y, colorStr, particleSize = 14) {
-    const pal = BLOCK_PALETTES[colorStr] || BLOCK_PALETTES[COLORS.purple];
-    const color = pal.base;
-    // ОПТИМИЗАЦИЯ: меньше DOM-частиц на мобильных
-    const particleCount = window.innerWidth <= 768 ? 4 : 7;
-
-    for (let i = 0; i < particleCount; i++) {
-        const p = document.createElement('div');
-        p.className = 'particle';
-        p.style.backgroundColor = color;
-        p.style.boxShadow = `0 0 6px ${color}`;
-        p.style.left = x + 'px';
-        p.style.top = y + 'px';
-        p.style.width = particleSize + 'px';
-        p.style.height = particleSize + 'px';
-
-        const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * 60 + 30;
-        const tx = Math.cos(angle) * distance;
-        const ty = Math.sin(angle) * distance;
-        const rot = Math.random() * 360 + 'deg';
-
-        p.style.setProperty('--tx', `calc(-50% + ${tx}px)`);
-        p.style.setProperty('--ty', `calc(-50% + ${ty}px)`);
-        p.style.setProperty('--rot', rot);
-
-        document.body.appendChild(p);
-        setTimeout(() => p.remove(), 500);
-    }
+    // Вызываем метод из новой системы частиц
+    particleSystem.createParticles(x, y, colorStr, particleSize, 7);
 }
 
 function createLandingParticles(x, y, colorStr) {
-    const pal = BLOCK_PALETTES[colorStr] || BLOCK_PALETTES[COLORS.purple];
-    const color = pal.base;
-
-    // ОПТИМИЗАЦИЯ: уменьшено количество частиц приземления
-    for (let i = 0; i < 2; i++) {
-        const p = document.createElement('div');
-        p.className = 'landing-particle';
-        p.style.backgroundColor = color;
-        p.style.opacity = '0.3';
-        p.style.left = x + 'px';
-        p.style.top = y + 'px';
-        p.style.width = '12px';
-        p.style.height = '12px';
-
-        const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * 40 + 10;
-        const tx = Math.cos(angle) * distance;
-        const ty = Math.sin(angle) * distance;
-
-        p.style.setProperty('--tx', `calc(-50% + ${tx}px)`);
-        p.style.setProperty('--ty', `calc(-50% + ${ty}px)`);
-
-        document.body.appendChild(p);
-        setTimeout(() => p.remove(), 600);
-    }
+    // Вызываем метод из новой системы частиц
+    particleSystem.createLandingParticles(x, y, colorStr);
 }
 
 function updateScore() {
