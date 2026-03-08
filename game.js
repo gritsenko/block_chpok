@@ -514,28 +514,36 @@ function getAllPossibleShapes() {
     for (let s = 0; s < SHAPES_DATA.length; s++) {
         const shape = SHAPES_DATA[s];
         let canPlaceShape = false;
+        let placementCount = 0; // Количество возможных мест для размещения
         
         // Проверяем все возможные позиции на доске
-        outerLoop: for (let r = 0; r <= BOARD_SIZE - shape.matrix.length; r++) {
+        for (let r = 0; r <= BOARD_SIZE - shape.matrix.length; r++) {
             for (let c = 0; c <= BOARD_SIZE - shape.matrix[0].length; c++) {
                 if (canPlace(shape, r, c)) {
                     canPlaceShape = true;
-                    break outerLoop;
+                    placementCount++; // Увеличиваем счетчик возможных мест
                 }
             }
         }
         
         if (canPlaceShape) {
-            // Добавляем индекс фигуры и вычисляем её "сложность" для сортировки
+            // Добавляем индекс фигуры и вычисляем её "сложность" и количество возможных мест
             const complexity = shape.matrix.length * shape.matrix[0].length;
-            possibleShapes.push({ index: s, complexity: complexity });
+            // Вычисляем приоритет: сложность + коэффициент от количества доступных мест
+            const priority = complexity + (placementCount / 10); // Делим на 10, чтобы не перекрывать влияние сложности
+            possibleShapes.push({ 
+                index: s, 
+                complexity: complexity,
+                placementCount: placementCount,
+                priority: priority 
+            });
         }
     }
     
-    // Сортируем по сложности в порядке убывания (сначала более сложные фигуры)
-    possibleShapes.sort((a, b) => b.complexity - a.complexity);
+    // Сортируем по приоритету: сначала более сложные фигуры с большим количеством доступных мест
+    possibleShapes.sort((a, b) => b.priority - a.priority);
     
-    // Возвращаем только индексы фигур в порядке убывания сложности
+    // Возвращаем только индексы фигур в порядке приоритета
     return possibleShapes.map(item => item.index);
 }
 
