@@ -232,29 +232,46 @@ const BLOCK_PALETTES = {
 };
 
 const SHAPES_DATA = [
-    { matrix: [[1]], color: COLORS.yellow },
-    { matrix: [[1, 1], [1, 1]], color: COLORS.blue },
-    { matrix: [[1, 1, 1], [1, 1, 1], [1, 1, 1]], color: COLORS.red },
-    { matrix: [[1, 1]], color: COLORS.green },
-    { matrix: [[1], [1]], color: COLORS.green },
-    { matrix: [[1, 1, 1]], color: COLORS.orange },
-    { matrix: [[1], [1], [1]], color: COLORS.orange },
-    { matrix: [[1, 1, 1, 1]], color: COLORS.blue },
-    { matrix: [[1], [1], [1], [1]], color: COLORS.blue },
-    { matrix: [[1, 1, 1, 1, 1]], color: COLORS.purple },
-    { matrix: [[1], [1], [1], [1], [1]], color: COLORS.purple },
-    { matrix: [[1, 0], [1, 1]], color: COLORS.orange },
-    { matrix: [[0, 1], [1, 1]], color: COLORS.orange },
-    { matrix: [[1, 1], [1, 0]], color: COLORS.orange },
-    { matrix: [[1, 1], [0, 1]], color: COLORS.orange },
-    { matrix: [[1, 0, 0], [1, 0, 0], [1, 1, 1]], color: COLORS.purple },
-    { matrix: [[0, 0, 1], [0, 0, 1], [1, 1, 1]], color: COLORS.purple },
-    { matrix: [[1, 1, 1], [1, 0, 0], [1, 0, 0]], color: COLORS.purple },
-    { matrix: [[1, 1, 1], [0, 0, 1], [0, 0, 1]], color: COLORS.purple },
-    { matrix: [[1, 1, 1], [0, 1, 0]], color: COLORS.green },
-    { matrix: [[0, 1, 0], [1, 1, 1]], color: COLORS.green },
-    { matrix: [[1, 0], [1, 1], [1, 0]], color: COLORS.green },
-    { matrix: [[0, 1], [1, 1], [0, 1]], color: COLORS.green }
+    // 3x3 figures (most complex)
+    { matrix: [[1, 1, 1], [1, 1, 1], [1, 1, 1]], color: COLORS.red }, // 3x3 square
+    { matrix: [[1, 1, 1], [1, 0, 0], [1, 0, 0]], color: COLORS.purple }, // L-shape
+    { matrix: [[1, 1, 1], [0, 0, 1], [0, 0, 1]], color: COLORS.purple }, // L-shape reversed
+    { matrix: [[1, 0, 0], [1, 0, 0], [1, 1, 1]], color: COLORS.purple }, // L-shape mirrored
+    { matrix: [[0, 0, 1], [0, 0, 1], [1, 1, 1]], color: COLORS.purple }, // L-shape mirrored reversed
+    { matrix: [[1, 1, 1], [0, 1, 0]], color: COLORS.green }, // T-shape
+    { matrix: [[0, 1, 0], [1, 1, 1]], color: COLORS.green }, // T-shape rotated
+    { matrix: [[1, 0], [1, 1], [1, 0]], color: COLORS.green }, // T-shape sideways
+    { matrix: [[0, 1], [1, 1], [0, 1]], color: COLORS.green }, // T-shape sideways mirrored
+    { matrix: [[1, 1, 1], [1, 1, 1]], color: COLORS.red }, // 2x3 rectangle
+    
+    // 2x2 figures
+    { matrix: [[1, 1], [1, 1]], color: COLORS.blue }, // 2x2 square
+    
+    // 2x3 and 3x2 rectangles
+    { matrix: [[1, 1], [1, 1], [1, 1]], color: COLORS.purple },  // 3x2 rectangle
+    
+    // Z-shaped figures (Tetris-like)
+    { matrix: [[1, 1, 0], [0, 1, 1]], color: COLORS.orange }, // Z-shape
+    { matrix: [[0, 1, 1], [1, 1, 0]], color: COLORS.orange }, // Z-shape mirrored
+    { matrix: [[1, 0], [1, 1], [0, 1]], color: COLORS.red }, // Z-shape vertical
+    { matrix: [[0, 1], [1, 1], [1, 0]], color: COLORS.red }, // Z-shape vertical mirrored
+    
+    // L-shaped figures
+    { matrix: [[1, 0], [1, 1]], color: COLORS.orange }, // L-shape small
+    { matrix: [[0, 1], [1, 1]], color: COLORS.orange }, // L-shape small mirrored
+    { matrix: [[1, 1], [1, 0]], color: COLORS.orange }, // L-shape small mirrored2
+    { matrix: [[1, 1], [0, 1]], color: COLORS.orange }, // L-shape small mirrored3
+    
+    // Diagonal figures
+    { matrix: [[1, 0], [0, 1]], color: COLORS.yellow }, // diagonal 2 blocks
+    
+    // 1xN and Nx1 figures
+    { matrix: [[1, 1, 1, 1, 1]], color: COLORS.purple }, // 1x5
+    { matrix: [[1], [1], [1], [1], [1]], color: COLORS.purple }, // 5x1
+    { matrix: [[1, 1, 1, 1]], color: COLORS.blue }, // 1x4
+    { matrix: [[1], [1], [1], [1]], color: COLORS.blue }, // 4x1
+    { matrix: [[1, 1, 1]], color: COLORS.orange }, // 1x3
+    { matrix: [[1], [1], [1]], color: COLORS.orange }  // 3x1
 ];
 
 // --- СОСТОЯНИЕ ИГРЫ ---
@@ -491,6 +508,95 @@ function createShapeHTML(shape, withPop = true) {
     return html;
 }
 
+function getAllPossibleShapes() {
+    const possibleShapes = [];
+    
+    for (let s = 0; s < SHAPES_DATA.length; s++) {
+        const shape = SHAPES_DATA[s];
+        let canPlaceShape = false;
+        
+        // Проверяем все возможные позиции на доске
+        outerLoop: for (let r = 0; r <= BOARD_SIZE - shape.matrix.length; r++) {
+            for (let c = 0; c <= BOARD_SIZE - shape.matrix[0].length; c++) {
+                if (canPlace(shape, r, c)) {
+                    canPlaceShape = true;
+                    break outerLoop;
+                }
+            }
+        }
+        
+        if (canPlaceShape) {
+            // Добавляем индекс фигуры и вычисляем её "сложность" для сортировки
+            const complexity = shape.matrix.length * shape.matrix[0].length;
+            possibleShapes.push({ index: s, complexity: complexity });
+        }
+    }
+    
+    // Сортируем по сложности в порядке убывания (сначала более сложные фигуры)
+    possibleShapes.sort((a, b) => b.complexity - a.complexity);
+    
+    // Возвращаем только индексы фигур в порядке убывания сложности
+    return possibleShapes.map(item => item.index);
+}
+
+// Проверяет, можно ли разместить все 3 фигуры из данного списка на текущей доске
+function canPlaceAllShapesInOrder(shapeList) {
+    // Создаем копию доски для симуляции
+    const tempBoard = board.map(row => [...row]);
+    
+    // Функция, которая проверяет возможность размещения фигуры на временной доске
+    function canPlaceOnTempBoard(shape, startR, startC) {
+        for (let r = 0; r < shape.matrix.length; r++) {
+            for (let c = 0; c < shape.matrix[0].length; c++) {
+                if (shape.matrix[r][c]) {
+                    const boardR = startR + r;
+                    const boardC = startC + c;
+                    if (boardR < 0 || boardR >= BOARD_SIZE || boardC < 0 || boardC >= BOARD_SIZE || tempBoard[boardR][boardC] !== null) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+    
+    // Функция, которая размещает фигуру на временной доске
+    function placeOnTempBoard(shape, startR, startC) {
+        for (let r = 0; r < shape.matrix.length; r++) {
+            for (let c = 0; c < shape.matrix[0].length; c++) {
+                if (shape.matrix[r][c]) {
+                    tempBoard[startR + r][startC + c] = shape.color;
+                }
+            }
+        }
+    }
+    
+    // Пробуем разместить все фигуры из списка
+    for (const shapeIndex of shapeList) {
+        const shape = SHAPES_DATA[shapeIndex];
+        let placed = false;
+        
+        // Ищем позицию для размещения фигуры
+        for (let r = 0; r <= BOARD_SIZE - shape.matrix.length; r++) {
+            for (let c = 0; c <= BOARD_SIZE - shape.matrix[0].length; c++) {
+                if (canPlaceOnTempBoard(shape, r, c)) {
+                    placeOnTempBoard(shape, r, c);
+                    placed = true;
+                    break;
+                }
+            }
+            if (placed) break;
+        }
+        
+        // Если не можем разместить хотя бы одну фигуру, возвращаем false
+        if (!placed) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
 function fillTray() {
     const emptyCount = trayPieces.filter(p => !p).length;
 
@@ -500,9 +606,98 @@ function fillTray() {
         renderTray(true);
 
         const refillStartTimeoutId = setTimeout(() => {
+            // Получаем все фигуры, которые можно разместить на текущей доске, в порядке убывания сложности
+            const possibleShapeIndices = getAllPossibleShapes();
+            
+            // Если нет доступных фигур, игра закончится в checkGameOver
+            // Но если они есть, выбираем 3 такие фигуры, чтобы все они могли быть размещены
+            let selectedShapes = [];
+            
+            if (possibleShapeIndices.length > 0) {
+                // Попробуем найти комбинацию из 3 фигур, которую можно разместить
+                let foundValidCombination = false;
+                
+                // Максимальное количество попыток подобрать комбинацию
+                let attempts = 0;
+                const maxAttempts = 100;
+                
+                while (!foundValidCombination && attempts < maxAttempts && possibleShapeIndices.length > 0) {
+                    attempts++;
+                    
+                    // Выбираем 3 фигуры с учетом приоритета по сложности
+                    const tempSelected = [];
+                    
+                    // Выбираем первую фигуру из более сложных (начало массива)
+                    const firstIndex = Math.floor(Math.random() * Math.min(5, possibleShapeIndices.length));
+                    tempSelected.push(possibleShapeIndices[firstIndex]);
+                    
+                    // Выбираем остальные две тоже из более сложных, но с некоторым разбросом
+                    for (let i = 1; i < 3; i++) {
+                        let randomIndex;
+                        // С вероятностью 70% выбираем из первых 1/3 фигур (более сложные)
+                        if (Math.random() < 0.7 && possibleShapeIndices.length > 0) {
+                            randomIndex = Math.floor(Math.random() * Math.min(Math.ceil(possibleShapeIndices.length / 3), possibleShapeIndices.length));
+                        } else {
+                            // Иначе случайный выбор из всех возможных
+                            randomIndex = Math.floor(Math.random() * possibleShapeIndices.length);
+                        }
+                        
+                        tempSelected.push(possibleShapeIndices[randomIndex]);
+                    }
+                    
+                    // Проверяем, можно ли разместить все 3 выбранные фигуры
+                    if (canPlaceAllShapesInOrder(tempSelected)) {
+                        selectedShapes = tempSelected.map(idx => cloneShape(SHAPES_DATA[idx]));
+                        foundValidCombination = true;
+                    }
+                }
+                
+                // Если так и не найдена подходящая комбинация, просто берем 3 случайные возможные фигуры из отсортированных
+                if (!foundValidCombination) {
+                    const usedIndices = new Set(); // Чтобы избежать дублирования фигур
+                    
+                    for (let i = 0; i < 3 && i < possibleShapeIndices.length; i++) {
+                        let selectedIndex;
+                        let attempts = 0;
+                        const maxAttempts = possibleShapeIndices.length; // Максимум попыток
+                        
+                        // Пытаемся найти фигуру, которой еще нет в выборке
+                        do {
+                            // Берем случайную фигуру из оставшихся (с приоритетом более сложных)
+                            let indexInPossible;
+                            if (Math.random() < 0.7 && i === 0) {
+                                // Первая фигура - с высоким приоритетом (из первых 30% фигур)
+                                indexInPossible = Math.floor(Math.random() * Math.min(Math.ceil(possibleShapeIndices.length * 0.3), possibleShapeIndices.length));
+                            } else {
+                                // Остальные фигуры - с некоторым приоритетом к более сложным
+                                indexInPossible = Math.floor(Math.random() * possibleShapeIndices.length);
+                            }
+                            
+                            selectedIndex = possibleShapeIndices[indexInPossible];
+                            attempts++;
+                        } while (usedIndices.has(selectedIndex) && attempts < maxAttempts);
+                        
+                        // Если не удалось найти уникальную фигуру, берем следующую доступную
+                        if (usedIndices.has(selectedIndex) && attempts >= maxAttempts) {
+                            for (let j = 0; j < possibleShapeIndices.length; j++) {
+                                if (!usedIndices.has(possibleShapeIndices[j])) {
+                                    selectedIndex = possibleShapeIndices[j];
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        usedIndices.add(selectedIndex);
+                        selectedShapes.push(cloneShape(SHAPES_DATA[selectedIndex]));
+                    }
+                }
+            }
+            
+            // Заполняем трей фигурами
             for (let i = 0; i < 3; i++) {
-                const randomShape = cloneShape(SHAPES_DATA[Math.floor(Math.random() * SHAPES_DATA.length)]);
-
+                // Если смогли подобрать подходящие фигуры, используем их, иначе берем случайную
+                const randomShape = selectedShapes[i] || cloneShape(SHAPES_DATA[Math.floor(Math.random() * SHAPES_DATA.length)]);
+                
                 const slotFillTimeoutId = setTimeout(() => {
                     trayPieces[i] = randomShape;
                     renderTray(false, new Set([i]));

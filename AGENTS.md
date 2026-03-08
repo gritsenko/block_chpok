@@ -23,11 +23,7 @@ This repo currently has **no configured build, lint, or automated test scripts**
 
 ### Run locally
 
-- Python static server:
-  - `python3 -m http.server 4173`
-  - open `http://localhost:4173`
-- Node static server (if available):
-  - `npx serve .`
+- it served by vs code lite server on http://localhost:3000
 
 ### Build
 
