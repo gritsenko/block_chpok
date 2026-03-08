@@ -220,25 +220,31 @@ class ParticleSystem {
     resizeCanvas() {
         if (!this.canvas) return;
         
-        // Размеры подстраиваются под контейнер доски
-        const boardContainer = document.querySelector('.board-container');
-        const boardRect = boardContainer.getBoundingClientRect();
+        // Размеры подстраиваются под весь игровой контейнер
+        const gameContainer = document.querySelector('.game-container');
+        const containerRect = gameContainer.getBoundingClientRect();
         
         // Устанавливаем размеры canvas
-        this.canvas.width = boardRect.width;
-        this.canvas.height = boardRect.height;
+        this.canvas.width = containerRect.width;
+        this.canvas.height = containerRect.height;
         
-        // Позиционируем canvas внутри board-container
+        // Позиционируем canvas внутри game-container
         this.canvas.style.position = 'absolute';
         this.canvas.style.top = '0';
         this.canvas.style.left = '0';
     }
     
-    createParticles(x, y, colorStr, particleSize = 14, count = 7) {
+    createParticles(x, y, colorStr, particleSize = 14, count = 7, particleType = 'explosion') {
         if (!this.ctx) return;
         
-        const pal = BLOCK_PALETTES[colorStr] || BLOCK_PALETTES[COLORS.purple];
-        const color = pal.base;
+        let color;
+        if (particleType === 'tray') {
+            // Для частиц в трее используем белый цвет
+            color = '#ffffff';
+        } else {
+            const pal = BLOCK_PALETTES[colorStr] || BLOCK_PALETTES[COLORS.purple];
+            color = pal.base;
+        }
         
         // Адаптируем количество частиц под мобильные устройства
         const particleCount = window.innerWidth <= 768 ? Math.floor(count * 0.6) : count;
@@ -250,32 +256,56 @@ class ParticleSystem {
             const ty = Math.sin(angle) * distance;
             const rot = Math.random() * 360;
             
-            // Получаем относительные координаты в системе координат canvas
-            const boardContainer = document.querySelector('.board-container');
-            const boardRect = boardContainer.getBoundingClientRect();
-            const relX = x - boardRect.left;
-            const relY = y - boardRect.top;
+            // Преобразуем глобальные координаты в координаты canvas
+            const gameContainer = document.querySelector('.game-container');
+            const containerRect = gameContainer.getBoundingClientRect();
+            const relX = x - containerRect.left;
+            const relY = y - containerRect.top;
+            
+            // Если частица находится за пределами canvas, не добавляем её
+            if (relX < 0 || relX > this.canvas.width || relY < 0 || relY > this.canvas.height) {
+                continue;
+            }
+            
+            // Настройки для частиц в трее
+            let adjustedSize = particleSize;
+            let adjustedLife = 0.5;
+            let adjustedTx = tx;
+            let adjustedTy = ty;
+            
+            if (particleType === 'tray') {
+                adjustedSize *= 0.7;  // 0.7x меньше
+                adjustedLife *= 0.5;  // 0.5x жизни (быстрее исчезают)
+                adjustedTx *= 2;      // 2x быстрее по X
+                adjustedTy *= 2;      // 2x быстрее по Y
+            }
             
             this.particles.push({
                 x: relX,
                 y: relY,
                 color: color,
-                size: particleSize,
-                tx: tx,
-                ty: ty,
+                size: adjustedSize,
+                tx: adjustedTx,
+                ty: adjustedTy,
                 rot: rot,
-                life: 0.5,
-                startLife: 0.5,
-                type: 'explosion'
+                life: adjustedLife,
+                startLife: adjustedLife,
+                type: particleType
             });
         }
     }
     
-    createLandingParticles(x, y, colorStr) {
+    createLandingParticles(x, y, colorStr, particleType = 'landing') {
         if (!this.ctx) return;
         
-        const pal = BLOCK_PALETTES[colorStr] || BLOCK_PALETTES[COLORS.purple];
-        const color = pal.base;
+        let color;
+        if (particleType === 'tray') {
+            // Для частиц в трее используем белый цвет
+            color = '#ffffff';
+        } else {
+            const pal = BLOCK_PALETTES[colorStr] || BLOCK_PALETTES[COLORS.purple];
+            color = pal.base;
+        }
         
         // Уменьшенное количество частиц приземления
         for (let i = 0; i < 2; i++) {
@@ -284,23 +314,43 @@ class ParticleSystem {
             const tx = Math.cos(angle) * distance;
             const ty = Math.sin(angle) * distance;
             
-            // Получаем относительные координаты в системе координат canvas
-            const boardContainer = document.querySelector('.board-container');
-            const boardRect = boardContainer.getBoundingClientRect();
-            const relX = x - boardRect.left;
-            const relY = y - boardRect.top;
+            // Преобразуем глобальные координаты в координаты canvas
+            const gameContainer = document.querySelector('.game-container');
+            const containerRect = gameContainer.getBoundingClientRect();
+            const relX = x - containerRect.left;
+            const relY = y - containerRect.top;
+            
+            // Если частица находится за пределами canvas, не добавляем её
+            if (relX < 0 || relX > this.canvas.width || relY < 0 || relY > this.canvas.height) {
+                continue;
+            }
+            
+            // Настройки для частиц в трее
+            let adjustedSize = 12;
+            let adjustedOpacity = 0.3;
+            let adjustedLife = 0.6;
+            let adjustedTx = tx;
+            let adjustedTy = ty;
+            
+            if (particleType === 'tray') {
+                adjustedSize *= 0.7;  // 0.7x меньше
+                adjustedOpacity *= 0.5;  // 0.5x прозрачнее
+                adjustedLife *= 0.5;  // 0.5x жизни (быстрее исчезают)
+                adjustedTx *= 2;      // 2x быстрее по X
+                adjustedTy *= 2;      // 2x быстрее по Y
+            }
             
             this.landingParticles.push({
                 x: relX,
                 y: relY,
                 color: color,
-                size: 12,
-                opacity: 0.3,
-                tx: tx,
-                ty: ty,
-                life: 0.6,
-                startLife: 0.6,
-                type: 'landing'
+                size: adjustedSize,
+                opacity: adjustedOpacity,
+                tx: adjustedTx,
+                ty: adjustedTy,
+                life: adjustedLife,
+                startLife: adjustedLife,
+                type: particleType
             });
         }
     }
@@ -332,10 +382,24 @@ class ParticleSystem {
             const currentOpacity = Math.min(1, particle.life / particle.startLife);
             
             this.ctx.save();
-            this.ctx.globalAlpha = currentOpacity;
+            
+            // Для частиц в трее устанавливаем пониженную прозрачность
+            let effectiveOpacity = currentOpacity;
+            if (particle.type === 'tray') {
+                effectiveOpacity *= 0.5; // 0.5 прозрачнее
+            }
+            
+            this.ctx.globalAlpha = effectiveOpacity;
             this.ctx.fillStyle = particle.color;
             this.ctx.shadowColor = particle.color;
-            this.ctx.shadowBlur = 6;
+            
+            // Для частиц в трее уменьшаем размытие тени
+            if (particle.type === 'tray') {
+                this.ctx.shadowBlur = 3;
+            } else {
+                this.ctx.shadowBlur = 6;
+            }
+            
             this.ctx.beginPath();
             this.ctx.arc(
                 particle.x + particle.tx * progress,
@@ -356,7 +420,14 @@ class ParticleSystem {
             const currentOpacity = particle.opacity * (1 - progress);
             
             this.ctx.save();
-            this.ctx.globalAlpha = currentOpacity;
+            
+            // Для частиц в трее устанавливаем пониженную прозрачность
+            let effectiveOpacity = currentOpacity;
+            if (particle.type === 'tray') {
+                effectiveOpacity *= 0.5; // 0.5 прозрачнее
+            }
+            
+            this.ctx.globalAlpha = effectiveOpacity;
             this.ctx.fillStyle = particle.color;
             this.ctx.beginPath();
             this.ctx.arc(
@@ -988,7 +1059,7 @@ function fillTray() {
                     const slot = traySlots[i];
                     if (slot) {
                         const rect = slot.getBoundingClientRect();
-                        createParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, randomShape.color, 42);
+                        createParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, randomShape.color, 42, 7, 'tray');
                     }
 
                     if (i === 2) {
@@ -1574,14 +1645,14 @@ function createPraisePopup(text) {
     setTimeout(() => p.remove(), 1200);
 }
 
-function createParticles(x, y, colorStr, particleSize = 14) {
+function createParticles(x, y, colorStr, particleSize = 14, count = 7, particleType = 'explosion') {
     // Вызываем метод из новой системы частиц
-    particleSystem.createParticles(x, y, colorStr, particleSize, 7);
+    particleSystem.createParticles(x, y, colorStr, particleSize, count, particleType);
 }
 
-function createLandingParticles(x, y, colorStr) {
+function createLandingParticles(x, y, colorStr, particleType = 'landing') {
     // Вызываем метод из новой системы частиц
-    particleSystem.createLandingParticles(x, y, colorStr);
+    particleSystem.createLandingParticles(x, y, colorStr, particleType);
 }
 
 function updateScore() {
