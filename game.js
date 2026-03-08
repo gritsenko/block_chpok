@@ -617,79 +617,107 @@ function fillTray() {
                 // Попробуем найти комбинацию из 3 фигур, которую можно разместить
                 let foundValidCombination = false;
                 
-                // Максимальное количество попыток подобрать комбинацию
-                let attempts = 0;
+                // Попробуем найти комбинацию без дубликатов
                 const maxAttempts = 100;
+                let attempts = 0;
                 
-                while (!foundValidCombination && attempts < maxAttempts && possibleShapeIndices.length > 0) {
+                while (!foundValidCombination && attempts < maxAttempts && possibleShapeIndices.length >= 3) {
                     attempts++;
                     
-                    // Выбираем 3 фигуры с учетом приоритета по сложности
+                    // Создаем копию массива возможных фигур и перемешиваем
+                    const shuffledIndices = [...possibleShapeIndices].sort(() => Math.random() - 0.5);
+                    
+                    // Берем первые 3 разных фигуры из перемешанного массива
                     const tempSelected = [];
+                    const usedIndices = new Set();
                     
-                    // Выбираем первую фигуру из более сложных (начало массива)
-                    const firstIndex = Math.floor(Math.random() * Math.min(5, possibleShapeIndices.length));
-                    tempSelected.push(possibleShapeIndices[firstIndex]);
-                    
-                    // Выбираем остальные две тоже из более сложных, но с некоторым разбросом
-                    for (let i = 1; i < 3; i++) {
-                        let randomIndex;
-                        // С вероятностью 70% выбираем из первых 1/3 фигур (более сложные)
-                        if (Math.random() < 0.7 && possibleShapeIndices.length > 0) {
-                            randomIndex = Math.floor(Math.random() * Math.min(Math.ceil(possibleShapeIndices.length / 3), possibleShapeIndices.length));
-                        } else {
-                            // Иначе случайный выбор из всех возможных
-                            randomIndex = Math.floor(Math.random() * possibleShapeIndices.length);
+                    for (const idx of shuffledIndices) {
+                        if (tempSelected.length >= 3) break;
+                        if (!usedIndices.has(idx)) {
+                            tempSelected.push(idx);
+                            usedIndices.add(idx);
                         }
-                        
-                        tempSelected.push(possibleShapeIndices[randomIndex]);
                     }
                     
                     // Проверяем, можно ли разместить все 3 выбранные фигуры
-                    if (canPlaceAllShapesInOrder(tempSelected)) {
+                    if (tempSelected.length === 3 && canPlaceAllShapesInOrder(tempSelected)) {
                         selectedShapes = tempSelected.map(idx => cloneShape(SHAPES_DATA[idx]));
                         foundValidCombination = true;
                     }
                 }
                 
-                // Если так и не найдена подходящая комбинация, просто берем 3 случайные возможные фигуры из отсортированных
-                if (!foundValidCombination) {
-                    const usedIndices = new Set(); // Чтобы избежать дублирования фигур
+                // Если не нашлась комбинация из 3 разных фигур, пробуем с меньшим приоритетом уникальности
+                if (!foundValidCombination && possibleShapeIndices.length > 0) {
+                    // Берем 3 фигуры, максимально избегая дубликатов
+                    const tempSelected = [];
+                    const usedIndices = new Set();
                     
-                    for (let i = 0; i < 3 && i < possibleShapeIndices.length; i++) {
+                    for (let i = 0; i < 3; i++) {
                         let selectedIndex;
-                        let attempts = 0;
-                        const maxAttempts = possibleShapeIndices.length; // Максимум попыток
                         
-                        // Пытаемся найти фигуру, которой еще нет в выборке
-                        do {
-                            // Берем случайную фигуру из оставшихся (с приоритетом более сложных)
-                            let indexInPossible;
-                            if (Math.random() < 0.7 && i === 0) {
-                                // Первая фигура - с высоким приоритетом (из первых 30% фигур)
-                                indexInPossible = Math.floor(Math.random() * Math.min(Math.ceil(possibleShapeIndices.length * 0.3), possibleShapeIndices.length));
-                            } else {
-                                // Остальные фигуры - с некоторым приоритетом к более сложным
-                                indexInPossible = Math.floor(Math.random() * possibleShapeIndices.length);
-                            }
+                        if (i === 0) {
+                            // Для первой фигуры берем самую сложную (если возможно)
+                            selectedIndex = possibleShapeIndices[0];
+                        } else {
+                            // Для последующих стараемся избегать дубликатов
+                            let candidateIndex = -1;
                             
-                            selectedIndex = possibleShapeIndices[indexInPossible];
-                            attempts++;
-                        } while (usedIndices.has(selectedIndex) && attempts < maxAttempts);
-                        
-                        // Если не удалось найти уникальную фигуру, берем следующую доступную
-                        if (usedIndices.has(selectedIndex) && attempts >= maxAttempts) {
+                            // Сначала пытаемся найти фигуру, которой нет в текущем списке
                             for (let j = 0; j < possibleShapeIndices.length; j++) {
-                                if (!usedIndices.has(possibleShapeIndices[j])) {
-                                    selectedIndex = possibleShapeIndices[j];
+                                const idx = possibleShapeIndices[j];
+                                if (!usedIndices.has(idx)) {
+                                    candidateIndex = idx;
                                     break;
                                 }
                             }
+                            
+                            // Если все фигуры уже используются, берем любую
+                            if (candidateIndex === -1) {
+                                selectedIndex = possibleShapeIndices[0]; // или первую доступную
+                            } else {
+                                selectedIndex = candidateIndex;
+                            }
                         }
                         
+                        tempSelected.push(selectedIndex);
                         usedIndices.add(selectedIndex);
-                        selectedShapes.push(cloneShape(SHAPES_DATA[selectedIndex]));
                     }
+                    
+                    // Проверяем, можно ли разместить эти фигуры
+                    if (canPlaceAllShapesInOrder(tempSelected)) {
+                        selectedShapes = tempSelected.map(idx => cloneShape(SHAPES_DATA[idx]));
+                    } else {
+                        // Если нельзя разместить, берем три разные фигуры без проверки размещения
+                        const differentShapes = [];
+                        const usedShapes = new Set();
+                        
+                        for (const idx of possibleShapeIndices) {
+                            if (differentShapes.length >= 3) break;
+                            
+                            // Проверяем, является ли фигура уникальной (на основе матрицы)
+                            const shapeMatrixKey = JSON.stringify(SHAPES_DATA[idx].matrix);
+                            if (!usedShapes.has(shapeMatrixKey)) {
+                                differentShapes.push(idx);
+                                usedShapes.add(shapeMatrixKey);
+                            }
+                        }
+                        
+                        // Если уникальных не хватает, добавляем оставшиеся
+                        if (differentShapes.length < 3) {
+                            for (const idx of possibleShapeIndices) {
+                                if (differentShapes.length >= 3) break;
+                                differentShapes.push(idx);
+                            }
+                        }
+                        
+                        selectedShapes = differentShapes.slice(0, 3).map(idx => cloneShape(SHAPES_DATA[idx]));
+                    }
+                }
+                
+                // Если и это не помогло, просто берём первые 3 возможные фигуры
+                if (selectedShapes.length === 0 && possibleShapeIndices.length > 0) {
+                    const limitedIndices = possibleShapeIndices.slice(0, 3);
+                    selectedShapes = limitedIndices.map(idx => cloneShape(SHAPES_DATA[idx]));
                 }
             }
             
