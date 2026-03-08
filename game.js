@@ -567,7 +567,7 @@ function canPlaceAllShapesInOrder(shapeList) {
         }
         return true;
     }
-    
+
     // Функция, которая размещает фигуру на временной доске
     function placeOnTempBoard(shape, startR, startC) {
         for (let r = 0; r < shape.matrix.length; r++) {
@@ -603,6 +603,63 @@ function canPlaceAllShapesInOrder(shapeList) {
     }
     
     return true;
+}
+
+function wouldCreateLineClear(shape, startR, startC) {
+    // Validate inputs first
+    if (!shape || startR < 0 || startC < 0) {
+        return { rows: [], cols: [] };
+    }
+    
+    // Create a temporary board to simulate the placement
+    const tempBoard = board.map(row => [...row]);
+    
+    // Place the shape on the temporary board
+    for (let r = 0; r < shape.matrix.length; r++) {
+        for (let c = 0; c < shape.matrix[0].length; c++) {
+            if (shape.matrix[r][c]) {
+                const boardR = startR + r;
+                const boardC = startC + c;
+                if (boardR >= 0 && boardR < BOARD_SIZE && boardC >= 0 && boardC < BOARD_SIZE) {
+                    tempBoard[boardR][boardC] = shape.color;
+                }
+            }
+        }
+    }
+    
+    // Check which rows and columns would be filled completely
+    const rowsToClear = [];
+    const colsToClear = [];
+    
+    // Check rows
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        let isRowFull = true;
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            if (tempBoard[r][c] === null) {
+                isRowFull = false;
+                break;
+            }
+        }
+        if (isRowFull) {
+            rowsToClear.push(r);
+        }
+    }
+    
+    // Check columns
+    for (let c = 0; c < BOARD_SIZE; c++) {
+        let isColFull = true;
+        for (let r = 0; r < BOARD_SIZE; r++) {
+            if (tempBoard[r][c] === null) {
+                isColFull = false;
+                break;
+            }
+        }
+        if (isColFull) {
+            colsToClear.push(c);
+        }
+    }
+    
+    return { rows: rowsToClear, cols: colsToClear };
 }
 
 function fillTray() {
@@ -892,7 +949,7 @@ function moveDrag(x, y) {
 function updatePreview() {
     clearPreview();
     const coords = getBoardCoordinates();
-    if (coords && canPlace(trayPieces[dragPieceIndex], coords.r, coords.c)) {
+    if (coords && dragPieceIndex >= 0 && trayPieces[dragPieceIndex] && canPlace(trayPieces[dragPieceIndex], coords.r, coords.c)) {
         drawPreview(trayPieces[dragPieceIndex], coords.r, coords.c);
     }
 }
@@ -919,17 +976,99 @@ function getBoardCoordinates() {
 }
 
 function clearPreview() {
-    document.querySelectorAll('.cell.preview').forEach(el => el.classList.remove('preview'));
+    document.querySelectorAll('.cell.preview').forEach(el => {
+        el.classList.remove('preview');
+        el.style.backgroundColor = ''; // Reset custom background
+    });
+    
+    // Also clear any line highlights
+    document.querySelectorAll('.cell.line-highlight').forEach(el => {
+        el.classList.remove('line-highlight');
+        el.style.removeProperty('--line-preview-color');
+    });
+}
+
+// Helper function to convert hex color to RGBA
+function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 function drawPreview(shape, startR, startC) {
+    // First clear all previous previews
+    clearPreview();
+    
+    // Validate inputs
+    if (!shape || startR < 0 || startC < 0) {
+        return;
+    }
+    
+    // Convert CSS variable to actual color value
+    const computedStyle = getComputedStyle(document.documentElement);
+    let shapeColor = shape.color;
+    if (shape.color && shape.color.includes('var(')) {
+        const varName = shape.color.replace('var(', '').replace(')', '').trim();
+        shapeColor = computedStyle.getPropertyValue(varName).trim();
+        
+        // If the resolved color is empty, use a default
+        if (!shapeColor) {
+            shapeColor = '#888888'; // default gray
+        }
+    } else if (!shape.color) {
+        shapeColor = '#888888'; // default gray
+    }
+    
+    // Add preview styling to the shape cells
     for (let r = 0; r < shape.matrix.length; r++) {
         for (let c = 0; c < shape.matrix[0].length; c++) {
-            if (shape.matrix[r][c]) {
+            if (shape.matrix && shape.matrix[r] && shape.matrix[r][c]) {
                 const cell = document.getElementById(`cell-${startR + r}-${startC + c}`);
-                if (cell) cell.classList.add('preview');
+                if (cell) {
+                    cell.classList.add('preview');
+                    
+                    // Apply the shape's color with reduced opacity (semi-transparent)
+                    // ~0.5 opacity for preview
+                    cell.style.backgroundColor = hexToRgba(shapeColor, 0.5);
+                }
             }
         }
+    }
+    
+    // Check if placing this shape would cause any line clears
+    try {
+        const wouldCauseLineClear = wouldCreateLineClear(shape, startR, startC);
+        if (wouldCauseLineClear.rows.length > 0 || wouldCauseLineClear.cols.length > 0) {
+            // Highlight the lines that would be cleared with the shape's color
+            for (const row of wouldCauseLineClear.rows) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const cell = document.getElementById(`cell-${row}-${c}`);
+                    if (cell) {
+                        cell.classList.add('line-highlight');
+                        cell.style.setProperty(
+                            '--line-preview-color',
+                            cell.classList.contains('preview') ? hexToRgba(shapeColor, 0.7) : hexToRgba(shapeColor, 0.6)
+                        );
+                    }
+                }
+            }
+            
+            for (const col of wouldCauseLineClear.cols) {
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    const cell = document.getElementById(`cell-${r}-${col}`);
+                    if (cell) {
+                        cell.classList.add('line-highlight');
+                        cell.style.setProperty(
+                            '--line-preview-color',
+                            cell.classList.contains('preview') ? hexToRgba(shapeColor, 0.7) : hexToRgba(shapeColor, 0.6)
+                        );
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Error in drawPreview when checking for line clears:", e);
     }
 }
 

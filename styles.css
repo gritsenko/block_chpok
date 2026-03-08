@@ -200,8 +200,29 @@ body {
 }
 
 .cell.preview {
-    background: rgba(255, 255, 255, 0.2);
     border-radius: 8px;
+    opacity: 0.7; /* Make it partially transparent to show the color underneath */
+}
+
+.cell.line-highlight {
+    border-radius: 6px;
+    position: relative;
+    z-index: 1;
+}
+
+.cell.line-highlight::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--line-preview-color, transparent);
+    pointer-events: none;
+    z-index: 3;
+}
+
+/* When a cell is both preview and line-highlight, prioritize line highlight appearance */
+.cell.preview.line-highlight {
+    opacity: 1;
 }
 
 /* Базовый класс для всех блоков */
@@ -212,6 +233,7 @@ body {
     box-sizing: border-box;
     border: 1px solid var(--outline);
     position: relative;
+    z-index: 1;
     animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     background:
         linear-gradient(225deg, var(--light-half) 49.1%, var(--dark-half) 53.2%),
