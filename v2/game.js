@@ -4,6 +4,12 @@ class AudioManager {
         this.audioContext = null;
         this.buffers = {};
         this.isInitialized = false;
+        // Background music properties
+        this.musicBuffer = null;
+        this.musicSource = null;
+        this.musicGainNode = null;
+        this.isMusicEnabled = localStorage.getItem('music_enabled') !== 'false';
+
         // ОПТИМИЗАЦИЯ: рекомендация - объединить mp3 в Audio Sprite для уменьшения HTTP-запросов
         this.soundConfigs = {
             pick: { file: 'pick.mp3', volume: 0.4 },
@@ -26,8 +32,24 @@ class AudioManager {
                 return this.loadSound(key, config.file);
             });
 
-            await Promise.all(loadPromises);
+            // Load music separately
+            const musicPromise = (async () => {
+                try {
+                    const response = await fetch('music.mp3');
+                    const arrayBuffer = await response.arrayBuffer();
+                    this.musicBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                } catch (e) {
+                    console.warn('Failed to load background music:', e);
+                }
+            })();
+
+            await Promise.all([...loadPromises, musicPromise]);
             this.isInitialized = true;
+
+            // Start music if enabled
+            if (this.isMusicEnabled) {
+                this.playMusic();
+            }
         } catch (e) {
             console.warn('Audio initialization failed:', e);
         }
@@ -40,6 +62,49 @@ class AudioManager {
             this.buffers[name] = await this.audioContext.decodeAudioData(arrayBuffer);
         } catch (e) {
             console.warn(`Failed to load sound ${name}:`, e);
+        }
+    }
+
+    playMusic() {
+        if (!this.isInitialized || !this.musicBuffer) return;
+        if (this.musicSource) return; // Already playing
+
+        try {
+            if (this.audioContext.state === 'suspended') {
+                this.audioContext.resume();
+            }
+
+            this.musicSource = this.audioContext.createBufferSource();
+            this.musicSource.buffer = this.musicBuffer;
+            this.musicSource.loop = true;
+
+            this.musicGainNode = this.audioContext.createGain();
+            this.musicGainNode.gain.value = this.isMusicEnabled ? 0.3 : 0; // volume is 0 if music is disabled
+
+            this.musicSource.connect(this.musicGainNode);
+            this.musicGainNode.connect(this.audioContext.destination);
+
+            this.musicSource.start(0);
+        } catch (e) {
+            console.warn('Failed to start music:', e);
+        }
+    }
+
+    stopMusic() {
+        // We'll keep it playing in the background but silent to avoid audio context issues on restart
+        if (this.musicGainNode) {
+            this.musicGainNode.gain.setTargetAtTime(0, this.audioContext.currentTime, 0.1);
+        }
+    }
+
+    toggleMusic(enabled) {
+        this.isMusicEnabled = enabled;
+        localStorage.setItem('music_enabled', enabled);
+        if (this.isInitialized && this.musicGainNode) {
+            const targetVolume = enabled ? 0.3 : 0;
+            this.musicGainNode.gain.setTargetAtTime(targetVolume, this.audioContext.currentTime, 0.1);
+        } else if (enabled) {
+            this.playMusic();
         }
     }
 
@@ -2329,6 +2394,34 @@ loadBestScore();
 
 const splashPlayBtn = document.getElementById('splash-play-btn');
 const splashOverlay = document.getElementById('splash-overlay');
+const settingsModal = document.getElementById('settings-modal');
+const settingsOpenBtn = document.getElementById('settings-open-btn');
+const settingsCloseBtn = document.getElementById('settings-close-btn');
+const musicToggle = document.getElementById('music-toggle');
+
+if (musicToggle) {
+    musicToggle.checked = audioManager.isMusicEnabled;
+    musicToggle.addEventListener('click', (e) => {
+        // change occurs after click, so we can use e.target.checked
+        audioManager.toggleMusic(e.target.checked);
+        audioManager.play('click');
+        haptic.confirm();
+    });
+}
+
+if (settingsOpenBtn) {
+    settingsOpenBtn.addEventListener('click', () => {
+        settingsModal.classList.remove('hidden');
+        audioManager.play('click');
+    });
+}
+
+if (settingsCloseBtn) {
+    settingsCloseBtn.addEventListener('click', () => {
+        settingsModal.classList.add('hidden');
+        audioManager.play('click');
+    });
+}
 
 function startGame() {
     splashOverlay.classList.add('hidden');
