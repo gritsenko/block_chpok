@@ -164,97 +164,46 @@ body {
     height: 18px;
 }
 
-.level-text {
-    text-align: center;
-    font-size: 26px;
-    color: #222;
-    margin: 0 0 15px 0;
-    font-weight: 800;
-    text-shadow: 0 2px 5px rgba(255, 255, 255, 0.7);
-}
-
-.meta-bar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
-    align-items: stretch;
-    margin-bottom: 14px;
-}
-
-.charge-indicator,
-.level-indicator {
-    background: rgba(255, 255, 255, 0.58);
-    border-radius: 16px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 8px 22px rgba(13, 18, 39, 0.15);
-}
-
-.charge-indicator {
-    --charge-accent: rgba(42, 46, 84, 0.7);
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 10px 14px 11px;
-    border: 2px solid color-mix(in srgb, var(--charge-accent) 35%, transparent);
-    overflow: hidden;
-}
-
-.charge-indicator::before {
-    content: '';
+.charge-circle {
     position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, color-mix(in srgb, var(--charge-accent) 15%, white) 0%, transparent 75%);
-    pointer-events: none;
+    right: 0;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background-color: #999;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
-.charge-indicator.is-ready {
-    animation: chargePulse 1.3s ease-in-out infinite;
+.charge-circle.is-ready {
+    transform: scale(1.2);
+    border-color: #fff;
+    box-shadow: 0 0 10px var(--charge-accent, #fff), 0 0 20px var(--charge-accent, rgba(255, 255, 255, 0.5));
+    animation: chargePulseReady 1.5s ease-in-out infinite;
 }
 
-.charge-indicator.is-neutral {
-    --charge-accent: rgba(42, 46, 84, 0.65);
+@keyframes chargePulseReady {
+    0%, 100% { transform: scale(1.2); opacity: 1; }
+    50% { transform: scale(1.4); opacity: 0.8; }
 }
 
-.charge-label,
-.charge-status,
-.level-indicator {
-    position: relative;
-    z-index: 1;
-}
-
-.charge-label {
-    font-size: 11px;
-    line-height: 1;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 900;
-    color: rgba(42, 46, 84, 0.68);
-}
-
-#charge-color-name {
-    position: relative;
-    z-index: 1;
-    font-size: 18px;
-    font-weight: 900;
-    color: #18203b;
-}
-
-.charge-status {
-    font-size: 12px;
-    line-height: 1.2;
-    color: rgba(24, 32, 59, 0.72);
-}
-
-.level-indicator {
+.score-container {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0 14px;
-    white-space: nowrap;
-    font-size: 13px;
-    font-weight: 900;
-    color: #1d2747;
+    gap: 12px;
+    margin-bottom: 15px;
+    position: relative;
+}
+
+.level-text {
+    text-align: center;
+    font-size: 32px;
+    color: #222;
+    margin: 0;
+    font-weight: 800;
+    text-shadow: 0 2px 5px rgba(255, 255, 255, 0.7);
 }
 
 .board-container {
@@ -750,7 +699,7 @@ body {
     text-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
     pointer-events: none;
     z-index: 2000;
-    animation: scoreFloat 1s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+    animation: scoreFloat 2s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
 }
 
 @keyframes scoreFloat {
@@ -768,14 +717,14 @@ body {
     text-shadow: 0 4px 10px rgba(0, 0, 0, 0.6);
     pointer-events: none;
     z-index: 2001;
-    animation: praisePop 1.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    animation: praisePop 2.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
 @keyframes praisePop {
-    0% { transform: translate(-50%, -50%) scale(0); opacity: 0; rotate: -10deg; }
-    20% { transform: translate(-50%, -120%) scale(1.4); opacity: 1; rotate: 5deg; }
-    40% { transform: translate(-50%, -120%) scale(1.2); opacity: 1; rotate: -5deg; }
-    100% { transform: translate(-50%, -250%) scale(1); opacity: 0; rotate: 0deg; }
+    0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+    20% { transform: translate(-50%, -120%) scale(1.4); opacity: 1; }
+    40% { transform: translate(-50%, -120%) scale(1.2); opacity: 1; }
+    100% { transform: translate(-50%, -250%) scale(1); opacity: 0; }
 }
 
 @media (max-width: 430px) {

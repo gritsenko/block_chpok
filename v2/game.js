@@ -652,10 +652,7 @@ const comboDisplay = document.getElementById('combo-display');
 const gameOverScreen = document.getElementById('game-over');
 const gameOverScoreEl = document.getElementById('game-over-score');
 const gameOverBestEl = document.getElementById('game-over-best');
-const chargeIndicatorEl = document.getElementById('charge-indicator');
-const chargeColorNameEl = document.getElementById('charge-color-name');
-const chargeStatusEl = document.getElementById('charge-status');
-const levelIndicatorEl = document.getElementById('level-indicator');
+const chargeCircleEl = document.getElementById('charge-circle');
 
 function playSound(soundName) {
     audioManager.play(soundName);
@@ -721,40 +718,16 @@ function resetAbilityRisk(color = null) {
 }
 
 function updateChargeUI() {
-    if (!chargeIndicatorEl || !chargeColorNameEl || !chargeStatusEl) return;
+    if (!chargeCircleEl) return;
 
-    const resolvedColor = activeChargeColor ? resolveColorValue(activeChargeColor) : 'rgba(42, 46, 84, 0.65)';
-    chargeIndicatorEl.style.setProperty('--charge-accent', resolvedColor);
-    chargeIndicatorEl.classList.toggle('is-ready', isAbilityReady);
-    chargeIndicatorEl.classList.toggle('is-neutral', !activeChargeColor);
-
-    if (!activeChargeColor) {
-        chargeColorNameEl.textContent = 'Нейтрально';
-        chargeStatusEl.textContent = canRotateTray
-            ? 'Поворот активен до следующей установки'
-            : 'Соберите линию, чтобы зарядить цвет';
-        return;
-    }
-
-    chargeColorNameEl.textContent = COLOR_NAMES[activeChargeColor] || 'Заряжено';
-    chargeStatusEl.textContent = isAbilityReady
-        ? 'Еще одна линия того же цвета активирует способность'
-        : 'Цвет перехвачен новым зарядом';
-
-    if (canRotateTray) {
-        chargeStatusEl.textContent += ' · Поворот активен';
-    }
+    const resolvedColor = activeChargeColor ? resolveColorValue(activeChargeColor) : '#999';
+    chargeCircleEl.style.setProperty('--charge-accent', resolvedColor);
+    chargeCircleEl.style.backgroundColor = resolvedColor;
+    chargeCircleEl.classList.toggle('is-ready', isAbilityReady);
 }
 
 function updateLevelUI() {
-    if (!levelIndicatorEl) return;
-
-    const nextThreshold = LEVEL_THRESHOLDS[currentLevel - 1];
-    if (Number.isFinite(nextThreshold)) {
-        levelIndicatorEl.textContent = `Уровень ${currentLevel} · цель ${nextThreshold.toLocaleString('ru-RU')}`;
-    } else {
-        levelIndicatorEl.textContent = `Уровень ${currentLevel} · максимум сложности`;
-    }
+    // Система уровней удалена
 }
 
 function resetChargeState() {
@@ -765,11 +738,8 @@ function resetChargeState() {
 }
 
 function getDifficultyShapeIndices(possibleShapeIndices) {
-    if (possibleShapeIndices.length <= 3) return possibleShapeIndices;
-
-    const keepRatio = currentLevel <= 1 ? 1 : currentLevel === 2 ? 0.75 : 0.55;
-    const minCount = Math.min(possibleShapeIndices.length, Math.max(6, Math.ceil(possibleShapeIndices.length * keepRatio)));
-    return possibleShapeIndices.slice(0, minCount);
+    // Система уровней удалена, возвращаем все доступные фигуры
+    return possibleShapeIndices;
 }
 
 function clearCrystalAt(r, c) {
@@ -2099,27 +2069,8 @@ function determineDominantLineColor(linesToClear) {
 }
 
 function maybeAdvanceLevel() {
-    let advanced = false;
-
-    while (currentLevel <= LEVEL_THRESHOLDS.length && score >= LEVEL_THRESHOLDS[currentLevel - 1]) {
-        currentLevel += 1;
-        advanced = true;
-    }
-
-    if (!advanced) return false;
-
-    board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
-    trayPieces = [null, null, null];
-    clearAllCrystals();
-    comboStreak = 0;
-    resetChargeState();
-    updateLevelUI();
-    renderBoard();
-    renderTray();
-    triggerCameraShake();
-    playSound('line');
-    createPraisePopup(`Уровень ${currentLevel}`);
-    return true;
+    // Система уровней удалена
+    return false;
 }
 
 async function checkLines(blocksPlaced, options = {}) {
@@ -2293,8 +2244,8 @@ async function checkLines(blocksPlaced, options = {}) {
         return totalLines;
     }
 
-    if (allowCharge && dominantLineColor) {
-        await processChargeColor(dominantLineColor);
+    if (allowCharge && totalLines > 0 && lastPlacedColor && isChargeableColor(lastPlacedColor)) {
+        await processChargeColor(lastPlacedColor);
     }
 
     return totalLines;
@@ -2394,6 +2345,8 @@ loadBestScore();
 
 const splashPlayBtn = document.getElementById('splash-play-btn');
 const splashOverlay = document.getElementById('splash-overlay');
+
+// Обработка модального окна настроек
 const settingsModal = document.getElementById('settings-modal');
 const settingsOpenBtn = document.getElementById('settings-open-btn');
 const settingsCloseBtn = document.getElementById('settings-close-btn');
@@ -2402,7 +2355,6 @@ const musicToggle = document.getElementById('music-toggle');
 if (musicToggle) {
     musicToggle.checked = audioManager.isMusicEnabled;
     musicToggle.addEventListener('click', (e) => {
-        // change occurs after click, so we can use e.target.checked
         audioManager.toggleMusic(e.target.checked);
         audioManager.play('click');
         haptic.confirm();
@@ -2411,17 +2363,18 @@ if (musicToggle) {
 
 if (settingsOpenBtn) {
     settingsOpenBtn.addEventListener('click', () => {
-        settingsModal.classList.remove('hidden');
+        if (settingsModal) settingsModal.classList.remove('hidden');
         audioManager.play('click');
     });
 }
 
 if (settingsCloseBtn) {
     settingsCloseBtn.addEventListener('click', () => {
-        settingsModal.classList.add('hidden');
+        if (settingsModal) settingsModal.classList.add('hidden');
         audioManager.play('click');
     });
 }
+
 
 function startGame() {
     splashOverlay.classList.add('hidden');
