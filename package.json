@@ -1,0 +1,14 @@
+{
+  "name": "block-chpok",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static browser game with source files in src and publish output in dist.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "clean": "node scripts/build.mjs --clean"
+  }
+}

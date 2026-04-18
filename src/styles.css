@@ -104,6 +104,8 @@ body {
     width: 45px;
     height: 45px;
     background: #60a5fa;
+    border: none;
+    padding: 0;
     border-radius: 50%;
     display: flex;
     justify-content: center;
@@ -111,12 +113,20 @@ body {
     box-shadow: 0 4px 0 #3b82f6, inset 0 2px 4px rgba(255, 255, 255, 0.4);
     cursor: pointer;
     z-index: 2;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .settings-btn svg {
     fill: white;
     width: 24px;
     height: 24px;
+}
+
+.settings-btn:active {
+    transform: translateY(2px);
+    box-shadow: 0 2px 0 #3b82f6, inset 0 2px 4px rgba(255, 255, 255, 0.4);
 }
 
 .title-container {
@@ -181,6 +191,13 @@ body {
     position: relative;
 }
 
+.board-container,
+.tray,
+.title-container,
+.level-text {
+    transition: filter 0.8s ease, opacity 0.8s ease, transform 0.8s ease;
+}
+
 .board {
     display: grid;
     grid-template-columns: repeat(8, 1fr);
@@ -217,6 +234,29 @@ body {
     z-index: 15;
     /* Убедиться, что canvas не влияет на размеры родителя */
     display: block;
+}
+
+.game-state-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 2400;
+    opacity: 0;
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(9, 11, 24, 0.08) 0%, rgba(9, 11, 24, 0.76) 100%);
+    transition: opacity 0.8s ease;
+}
+
+.game-container.game-over-transition .game-state-overlay {
+    opacity: 1;
+}
+
+.game-container.game-over-transition .board-container,
+.game-container.game-over-transition .tray,
+.game-container.game-over-transition .title-container,
+.game-container.game-over-transition .level-text {
+    filter: grayscale(1) saturate(0.2) brightness(0.76);
+    opacity: 0.62;
+    transform: scale(0.985);
 }
 
 .cell.line-highlight {
@@ -514,13 +554,155 @@ body {
     100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
 }
 
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(7, 10, 22, 0.42);
+    z-index: 3200;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+.modal-overlay.show {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.settings-modal {
+    width: min(100%, 360px);
+    background: rgba(255, 255, 255, 0.96);
+    border-radius: 24px;
+    padding: 22px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+    transform: translateY(18px) scale(0.96);
+    transition: transform 0.25s ease;
+}
+
+.modal-overlay.show .settings-modal {
+    transform: translateY(0) scale(1);
+}
+
+.settings-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.settings-modal-header h2 {
+    margin: 0;
+    font-size: 28px;
+    color: #1f2937;
+}
+
+.settings-close-btn {
+    width: 42px;
+    height: 42px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(148, 163, 184, 0.18);
+    color: #334155;
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.settings-close-btn:active {
+    transform: scale(0.95);
+}
+
+.settings-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 0 4px;
+    color: #111827;
+    font-weight: 800;
+}
+
+.settings-option-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.settings-option-status {
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-flex;
+    width: 62px;
+    height: 36px;
+    flex: 0 0 auto;
+}
+
+.toggle-switch input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    margin: 0;
+}
+
+.toggle-slider {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 999px;
+    background: #cbd5e1;
+    box-shadow: inset 0 2px 5px rgba(15, 23, 42, 0.16);
+    transition: background 0.25s ease;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.22);
+    transition: transform 0.25s ease;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(26px);
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+    outline: 3px solid rgba(96, 165, 250, 0.55);
+    outline-offset: 3px;
+}
+
 #game-over {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.7);
+    background: linear-gradient(180deg, rgba(5, 8, 18, 0.1) 0%, rgba(5, 8, 18, 0.58) 100%);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -528,12 +710,16 @@ body {
     z-index: 3000;
     visibility: hidden;
     opacity: 0;
-    transition: opacity 0.3s;
+    pointer-events: none;
+    transform: translateY(18px) scale(0.96);
+    transition: opacity 0.35s ease, transform 0.35s ease;
 }
 
 #game-over.show {
     visibility: visible;
     opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
 }
 
 #game-over h2 {

@@ -4,13 +4,9 @@ class AudioManager {
         this.audioContext = null;
         this.buffers = {};
         this.isInitialized = false;
-        // Background music properties
-        this.musicBuffer = null;
-        this.musicSource = null;
-        this.musicGainNode = null;
-        this.isMusicEnabled = localStorage.getItem('music_enabled') !== 'false';
-
-        // ОПТИМИЗАЦИЯ: рекомендация - объединить mp3 в Audio Sprite для уменьшения HTTP-запросов
+        this.soundsEnabled = true;
+        this.hasStartedSession = false;
+        this.assetCacheName = 'block-chpok-audio-v1';
         this.soundConfigs = {
             pick: { file: 'pick.mp3', volume: 0.4 },
             click: { file: 'click.mp3', volume: 0.3 },
@@ -20,36 +16,56 @@ class AudioManager {
         };
     }
 
+    async ensureAudioContext() {
+        if (!this.audioContext) {
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        if (this.audioContext.state === 'suspended') {
+            await this.audioContext.resume();
+        }
+
+        return this.audioContext;
+    }
+
+    async fetchAudioArrayBuffer(fileName, cacheName) {
+        const assetUrl = new URL(fileName, window.location.href).href;
+
+        if ('caches' in window) {
+            const cache = await caches.open(cacheName);
+            let response = await cache.match(assetUrl);
+
+            if (!response) {
+                response = await fetch(assetUrl, { cache: 'force-cache' });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                cache.put(assetUrl, response.clone()).catch(() => {});
+            }
+
+            return response.arrayBuffer();
+        }
+
+        const response = await fetch(assetUrl, { cache: 'force-cache' });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        return response.arrayBuffer();
+    }
+
     async init() {
-        if (this.isInitialized) return;
+        if (this.isInitialized || !this.soundsEnabled) return;
 
         try {
-            if (!this.audioContext) {
-                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }
+            await this.ensureAudioContext();
 
             const loadPromises = Object.entries(this.soundConfigs).map(([key, config]) => {
                 return this.loadSound(key, config.file);
             });
 
-            // Load music separately
-            const musicPromise = (async () => {
-                try {
-                    const response = await fetch('music.mp3');
-                    const arrayBuffer = await response.arrayBuffer();
-                    this.musicBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-                } catch (e) {
-                    console.warn('Failed to load background music:', e);
-                }
-            })();
-
-            await Promise.all([...loadPromises, musicPromise]);
+            await Promise.all(loadPromises);
             this.isInitialized = true;
-
-            // Start music if enabled
-            if (this.isMusicEnabled) {
-                this.playMusic();
-            }
         } catch (e) {
             console.warn('Audio initialization failed:', e);
         }
@@ -57,58 +73,72 @@ class AudioManager {
 
     async loadSound(name, fileName) {
         try {
-            const response = await fetch(fileName);
-            const arrayBuffer = await response.arrayBuffer();
+            const arrayBuffer = await this.fetchAudioArrayBuffer(fileName, this.assetCacheName);
             this.buffers[name] = await this.audioContext.decodeAudioData(arrayBuffer);
         } catch (e) {
             console.warn(`Failed to load sound ${name}:`, e);
         }
     }
 
-    playMusic() {
-        if (!this.isInitialized || !this.musicBuffer) return;
-        if (this.musicSource) return; // Already playing
+    async beginGameSession() {
+        this.hasStartedSession = true;
+
+        if (!this.soundsEnabled) {
+            return;
+        }
 
         try {
-            if (this.audioContext.state === 'suspended') {
-                this.audioContext.resume();
-            }
-
-            this.musicSource = this.audioContext.createBufferSource();
-            this.musicSource.buffer = this.musicBuffer;
-            this.musicSource.loop = true;
-
-            this.musicGainNode = this.audioContext.createGain();
-            this.musicGainNode.gain.value = this.isMusicEnabled ? 0.3 : 0; // volume is 0 if music is disabled
-
-            this.musicSource.connect(this.musicGainNode);
-            this.musicGainNode.connect(this.audioContext.destination);
-
-            this.musicSource.start(0);
+            await this.ensureAudioContext();
         } catch (e) {
-            console.warn('Failed to start music:', e);
+            console.warn('Audio context startup failed:', e);
+        }
+
+        this.init().catch(() => {});
+    }
+
+    async suspend() {
+        if (!this.audioContext || this.audioContext.state !== 'running') {
+            return;
+        }
+
+        try {
+            await this.audioContext.suspend();
+        } catch (e) {
+            console.warn('Failed to suspend audio context:', e);
         }
     }
 
-    stopMusic() {
-        // We'll keep it playing in the background but silent to avoid audio context issues on restart
-        if (this.musicGainNode) {
-            this.musicGainNode.gain.setTargetAtTime(0, this.audioContext.currentTime, 0.1);
+    async resume() {
+        if (!this.soundsEnabled || !this.hasStartedSession) {
+            return;
+        }
+
+        try {
+            await this.ensureAudioContext();
+            this.init().catch(() => {});
+        } catch (e) {
+            console.warn('Failed to resume audio context:', e);
         }
     }
 
-    toggleMusic(enabled) {
-        this.isMusicEnabled = enabled;
-        localStorage.setItem('music_enabled', enabled);
-        if (this.isInitialized && this.musicGainNode) {
-            const targetVolume = enabled ? 0.3 : 0;
-            this.musicGainNode.gain.setTargetAtTime(targetVolume, this.audioContext.currentTime, 0.1);
-        } else if (enabled) {
-            this.playMusic();
+    setSoundEnabled(enabled) {
+        this.soundsEnabled = enabled;
+
+        if (!enabled) {
+            this.suspend().catch(() => {});
+            return;
+        }
+
+        if (this.hasStartedSession) {
+            this.resume().catch(() => {});
         }
     }
 
     play(soundName) {
+        if (!this.soundsEnabled) {
+            return;
+        }
+
         if (!this.isInitialized) {
             this.init().catch(() => {});
             return;
@@ -118,7 +148,7 @@ class AudioManager {
 
         try {
             if (this.audioContext && this.audioContext.state === 'suspended') {
-                this.audioContext.resume();
+                this.audioContext.resume().catch(() => {});
             }
 
             const buffer = this.buffers[soundName];
@@ -527,31 +557,63 @@ if (document.readyState === 'complete') {
 // --- НАСТРОЙКИ И ДАННЫЕ ---
 const BOARD_SIZE = 8;
 const BEST_SCORE_KEY = 'block-chpok-best-score';
+const SOUND_ENABLED_KEY = 'block-chpok-sound-enabled';
+const LEGACY_MUSIC_ENABLED_KEY = 'block-chpok-music-enabled';
+const DEFAULT_LANGUAGE = 'en';
+const LOGO_BY_LANGUAGE = {
+    en: 'logo.png',
+    ru: 'logo_ru.png'
+};
+const I18N = {
+    en: {
+        numberLocale: 'en-US',
+        documentTitle: 'Block Chpok',
+        ogDescription: 'A playful block puzzle game',
+        play: 'Play',
+        gameOverTitle: 'Game Over!',
+        scoreLabel: 'Score:',
+        bestLabel: 'Best:',
+        restart: 'Play Again',
+        settingsTitle: 'Settings',
+        openSettings: 'Open settings',
+        closeSettings: 'Close settings',
+        soundLabel: 'Sounds',
+        soundOn: 'On',
+        soundOff: 'Off',
+        comboLabel: 'Combo',
+        splashLogoAlt: 'Block Chpok',
+        headerLogoAlt: 'Block Chpok Logo',
+        praiseLines: ['Good!', 'Great!', 'Super!', 'Excellent!', 'Amazing!', 'Incredible!', 'Unbelievable!', 'Godlike!']
+    },
+    ru: {
+        numberLocale: 'ru-RU',
+        documentTitle: 'Block Chpok',
+        ogDescription: 'Увлекательная головоломка с блоками',
+        play: 'Играть',
+        gameOverTitle: 'Игра окончена!',
+        scoreLabel: 'Счет:',
+        bestLabel: 'Рекорд:',
+        restart: 'Играть снова',
+        settingsTitle: 'Настройки',
+        openSettings: 'Открыть настройки',
+        closeSettings: 'Закрыть настройки',
+        soundLabel: 'Звуки',
+        soundOn: 'Вкл',
+        soundOff: 'Выкл',
+        comboLabel: 'Комбо',
+        splashLogoAlt: 'Block Chpok',
+        headerLogoAlt: 'Логотип Block Chpok',
+        praiseLines: ['Хорошо!', 'Отлично!', 'Супер!', 'Превосходно!', 'Потрясающе!', 'Невероятно!', 'Феноменально!', 'Легендарно!']
+    }
+};
 const COLORS = {
     orange: 'var(--color-orange)',
     blue: 'var(--color-blue)',
     green: 'var(--color-green)',
     purple: 'var(--color-purple)',
     yellow: 'var(--color-yellow)',
-    red: 'var(--color-red)',
-    dead: 'var(--color-dead)'
+    red: 'var(--color-red)'
 };
-
-const CHARGEABLE_COLORS = [COLORS.red, COLORS.blue, COLORS.green, COLORS.orange, COLORS.yellow, COLORS.purple];
-const COLOR_NAMES = {
-    [COLORS.red]: 'Красный',
-    [COLORS.blue]: 'Синий',
-    [COLORS.green]: 'Зеленый',
-    [COLORS.orange]: 'Оранжевый',
-    [COLORS.yellow]: 'Желтый',
-    [COLORS.purple]: 'Фиолетовый',
-    [COLORS.dead]: 'Мертвый'
-};
-const LEVEL_THRESHOLDS = [1000, 2500];
-const CRYSTAL_MULTIPLIER = 5;
-const CRYSTAL_SCORE_BONUS = 120;
-const ROTATE_HOLD_DELAY = 170;
-const ROTATE_DRAG_THRESHOLD = 10;
 
 const COLOR_CLASS_BY_TOKEN = {
     [COLORS.orange]: 'block-color-orange',
@@ -559,8 +621,7 @@ const COLOR_CLASS_BY_TOKEN = {
     [COLORS.green]: 'block-color-green',
     [COLORS.purple]: 'block-color-purple',
     [COLORS.yellow]: 'block-color-yellow',
-    [COLORS.red]: 'block-color-red',
-    [COLORS.dead]: 'block-color-dead'
+    [COLORS.red]: 'block-color-red'
 };
 
 // ОПТИМИЗАЦИЯ: палитра упрощена до базовых цветов (используется для частиц)
@@ -570,8 +631,7 @@ const BLOCK_PALETTES = {
     [COLORS.green]: { base: '#66cc33' },
     [COLORS.purple]: { base: '#b042ff' },
     [COLORS.yellow]: { base: '#ffcc00' },
-    [COLORS.red]: { base: '#f03030' },
-    [COLORS.dead]: { base: '#778096' }
+    [COLORS.red]: { base: '#f03030' }
 };
 
 const SHAPES_DATA = [
@@ -626,18 +686,18 @@ let displayedScore = 0;
 let scoreAnimationToken = 0;
 let refillTimeoutIds = [];
 let gameOverTimeoutId = null;
+let gameOverRevealTimeoutId = null;
 let isRefillingTray = false;
 let lastPlacementCoords = null;
 let comboStreak = 0;
-let lastPlacedColor = null;
-let activeChargeColor = null;
-let isAbilityReady = false;
-let canRotateTray = false;
-let crystalCells = new Set();
-let currentLevel = 1;
-let abilityUsageCounts = createAbilityUsageCounts();
-let lastActivatedAbilityColor = null;
-let pendingTrayInteraction = null;
+let currentLanguage = DEFAULT_LANGUAGE;
+let isSoundEnabled = readStoredBoolean(SOUND_ENABLED_KEY, readStoredBoolean(LEGACY_MUSIC_ENABLED_KEY, true));
+let hasGameStarted = false;
+let isGameOverSequenceActive = false;
+let isGameplayPausedBySdk = false;
+let isGameplayMarkedActive = false;
+let hasBoundYandexLifecycle = false;
+let yandexLifecycleInitPromise = null;
 
 const gameContainer = document.querySelector('.game-container');
 const boardEl = document.getElementById('board');
@@ -647,12 +707,138 @@ const traySlots = [
     document.getElementById('slot-2')
 ];
 const scoreEl = document.getElementById('score');
+const mainScoreEl = document.getElementById('main-score');
 const bestScoreEl = document.getElementById('best-score');
 const comboDisplay = document.getElementById('combo-display');
 const gameOverScreen = document.getElementById('game-over');
+const gameOverTitleEl = document.getElementById('game-over-title');
+const gameOverScoreLabelEl = document.getElementById('game-over-score-label');
 const gameOverScoreEl = document.getElementById('game-over-score');
+const gameOverBestLabelEl = document.getElementById('game-over-best-label');
 const gameOverBestEl = document.getElementById('game-over-best');
-const chargeCircleEl = document.getElementById('charge-circle');
+const restartBtn = document.getElementById('restart-btn');
+const splashPlayBtn = document.getElementById('splash-play-btn');
+const splashOverlay = document.getElementById('splash-overlay');
+const splashLogoEl = document.getElementById('splash-logo');
+const headerLogoEl = document.getElementById('header-logo');
+const settingsBtn = document.getElementById('settings-btn');
+const settingsModal = document.getElementById('settings-modal');
+const settingsTitleEl = document.getElementById('settings-title');
+const settingsCloseBtn = document.getElementById('settings-close-btn');
+const musicToggle = document.getElementById('music-toggle');
+const musicToggleLabelEl = document.getElementById('music-toggle-label');
+const musicToggleStatusEl = document.getElementById('music-toggle-status');
+const ogTitleMeta = document.querySelector('meta[property="og:title"]');
+const ogDescriptionMeta = document.querySelector('meta[property="og:description"]');
+const localizedLogoEls = [splashLogoEl, headerLogoEl];
+
+audioManager.setSoundEnabled(isSoundEnabled);
+
+function normalizeLanguage(lang) {
+    if (typeof lang !== 'string') return DEFAULT_LANGUAGE;
+    return lang.toLowerCase().startsWith('ru') ? 'ru' : 'en';
+}
+
+function getMessages() {
+    return I18N[currentLanguage] || I18N[DEFAULT_LANGUAGE];
+}
+
+function formatNumber(value) {
+    const locale = getMessages().numberLocale;
+    return Number.isFinite(value) ? value.toLocaleString(locale) : '0';
+}
+
+function readStoredBoolean(key, fallbackValue) {
+    try {
+        const rawValue = window.localStorage.getItem(key);
+        if (rawValue === null) return fallbackValue;
+        return rawValue !== '0' && rawValue !== 'false';
+    } catch {
+        return fallbackValue;
+    }
+}
+
+function writeStoredBoolean(key, value) {
+    try {
+        window.localStorage.setItem(key, value ? '1' : '0');
+    } catch {
+        // ignore storage errors
+    }
+}
+
+function applyLocalizedLogos(language) {
+    const preferredLogo = LOGO_BY_LANGUAGE[language] || LOGO_BY_LANGUAGE[DEFAULT_LANGUAGE];
+    const fallbackLogo = LOGO_BY_LANGUAGE[DEFAULT_LANGUAGE];
+
+    localizedLogoEls.forEach(img => {
+        if (!img) return;
+
+        img.onerror = preferredLogo !== fallbackLogo ? () => {
+            img.onerror = null;
+            img.src = fallbackLogo;
+        } : null;
+
+        if (img.getAttribute('src') !== preferredLogo) {
+            img.src = preferredLogo;
+        }
+    });
+}
+
+function syncSoundToggleUI() {
+    const messages = getMessages();
+
+    if (musicToggle) {
+        musicToggle.checked = isSoundEnabled;
+    }
+
+    if (musicToggleStatusEl) {
+        musicToggleStatusEl.textContent = isSoundEnabled ? messages.soundOn : messages.soundOff;
+    }
+}
+
+function refreshVisibleScoreText() {
+    scoreEl.textContent = formatNumber(score);
+    mainScoreEl.textContent = formatNumber(displayedScore);
+    gameOverScoreEl.textContent = formatNumber(score);
+    updateBestScoreDisplay();
+}
+
+function applyTranslations(language) {
+    currentLanguage = normalizeLanguage(language);
+    const messages = getMessages();
+
+    document.documentElement.lang = currentLanguage;
+    document.title = messages.documentTitle;
+
+    if (ogTitleMeta) {
+        ogTitleMeta.setAttribute('content', messages.documentTitle);
+    }
+
+    if (ogDescriptionMeta) {
+        ogDescriptionMeta.setAttribute('content', messages.ogDescription);
+    }
+
+    splashPlayBtn.textContent = messages.play;
+    gameOverTitleEl.textContent = messages.gameOverTitle;
+    gameOverScoreLabelEl.textContent = messages.scoreLabel;
+    gameOverBestLabelEl.textContent = messages.bestLabel;
+    restartBtn.textContent = messages.restart;
+    settingsTitleEl.textContent = messages.settingsTitle;
+    musicToggleLabelEl.textContent = messages.soundLabel;
+    settingsBtn.setAttribute('aria-label', messages.openSettings);
+    settingsCloseBtn.setAttribute('aria-label', messages.closeSettings);
+    splashLogoEl.alt = messages.splashLogoAlt;
+    headerLogoEl.alt = messages.headerLogoAlt;
+
+    applyLocalizedLogos(currentLanguage);
+    syncSoundToggleUI();
+
+    if (comboStreak >= 2) {
+        comboDisplay.textContent = `${messages.comboLabel} x${comboStreak}`;
+    }
+
+    refreshVisibleScoreText();
+}
 
 function playSound(soundName) {
     audioManager.play(soundName);
@@ -666,6 +852,7 @@ let dragStartPointerX = 0;
 let dragStartPointerY = 0;
 let dragAnchorX = 0;
 let dragAnchorY = 0;
+let dragPointerType = 'mouse';
 let cellSize = 0;
 let lastKnownCellSize = 0;
 let gapSize = 3;
@@ -679,137 +866,27 @@ const DRAG_POPUP_LIFT_Y = 58;
 // ОПТИМИЗАЦИЯ: переиспользуем объект координат и уменьшаем давление на GC
 const currentCoords = { r: -1, c: -1 };
 
-function createAbilityUsageCounts() {
-    return CHARGEABLE_COLORS.reduce((acc, color) => {
-        acc[color] = 0;
-        return acc;
-    }, {});
+function canInteractWithGameplay() {
+    return shouldGameplayBeActive();
 }
 
-function getCellKey(r, c) {
-    return `${r},${c}`;
-}
-
-function isDeadBlock(colorStr) {
-    return colorStr === COLORS.dead;
-}
-
-function isChargeableColor(colorStr) {
-    return CHARGEABLE_COLORS.includes(colorStr);
-}
-
-function resolveColorValue(colorToken) {
-    if (!colorToken) return '#2a2e54';
-    if (!colorToken.includes('var(')) return colorToken;
-
-    const computedStyle = getComputedStyle(document.documentElement);
-    const varName = colorToken.replace('var(', '').replace(')', '').trim();
-    return computedStyle.getPropertyValue(varName).trim() || '#2a2e54';
-}
-
-function countShapeBlocks(shape) {
-    if (!shape) return 0;
-    return shape.matrix.reduce((total, row) => total + row.reduce((sum, cell) => sum + (cell ? 1 : 0), 0), 0);
-}
-
-function resetAbilityRisk(color = null) {
-    abilityUsageCounts = createAbilityUsageCounts();
-    lastActivatedAbilityColor = color;
-}
-
-function updateChargeUI() {
-    if (!chargeCircleEl) return;
-
-    const resolvedColor = activeChargeColor ? resolveColorValue(activeChargeColor) : '#999';
-    chargeCircleEl.style.setProperty('--charge-accent', resolvedColor);
-    chargeCircleEl.style.backgroundColor = resolvedColor;
-    chargeCircleEl.classList.toggle('is-ready', isAbilityReady);
-}
-
-function updateLevelUI() {
-    // Система уровней удалена
-}
-
-function resetChargeState() {
-    activeChargeColor = null;
-    isAbilityReady = false;
-    canRotateTray = false;
-    updateChargeUI();
-}
-
-function getDifficultyShapeIndices(possibleShapeIndices) {
-    // Система уровней удалена, возвращаем все доступные фигуры
-    return possibleShapeIndices;
-}
-
-function clearCrystalAt(r, c) {
-    crystalCells.delete(getCellKey(r, c));
-}
-
-function clearAllCrystals() {
-    crystalCells.clear();
-}
-
-function getOccupiedCells(includeDead = true) {
-    const occupied = [];
-
-    for (let r = 0; r < BOARD_SIZE; r++) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
-            const color = board[r][c];
-            if (!color) continue;
-            if (!includeDead && isDeadBlock(color)) continue;
-            occupied.push({ r, c, color });
-        }
+function waitForGameplayResume() {
+    if (!isGameplayPausedBySdk) {
+        return Promise.resolve();
     }
 
-    return occupied;
-}
-
-function getEmptyCells() {
-    const emptyCells = [];
-
-    for (let r = 0; r < BOARD_SIZE; r++) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
-            if (board[r][c] === null) {
-                emptyCells.push({ r, c });
+    return new Promise(resolve => {
+        const check = () => {
+            if (!isGameplayPausedBySdk) {
+                resolve();
+                return;
             }
-        }
-    }
 
-    return emptyCells;
-}
+            setTimeout(check, 50);
+        };
 
-function pickRandom(list) {
-    if (!list.length) return null;
-    return list[Math.floor(Math.random() * list.length)];
-}
-
-function removeBoardCell(r, c) {
-    if (!board[r][c]) return false;
-    clearCrystalAt(r, c);
-    board[r][c] = null;
-    return true;
-}
-
-function rotateMatrixClockwise(matrix) {
-    return matrix[0].map((_, columnIndex) => matrix.map(row => row[columnIndex]).reverse());
-}
-
-function getUniqueShapeRotations(shape) {
-    const rotations = [];
-    const seen = new Set();
-    let currentMatrix = shape.matrix.map(row => row.slice());
-
-    for (let i = 0; i < 4; i++) {
-        const key = JSON.stringify(currentMatrix);
-        if (!seen.has(key)) {
-            seen.add(key);
-            rotations.push({ matrix: currentMatrix.map(row => row.slice()), color: shape.color });
-        }
-        currentMatrix = rotateMatrixClockwise(currentMatrix);
-    }
-
-    return rotations;
+        check();
+    });
 }
 
 function cloneShape(shape) {
@@ -830,6 +907,157 @@ function clearPendingGameOver() {
     if (gameOverTimeoutId !== null) {
         clearTimeout(gameOverTimeoutId);
         gameOverTimeoutId = null;
+    }
+
+    if (gameOverRevealTimeoutId !== null) {
+        clearTimeout(gameOverRevealTimeoutId);
+        gameOverRevealTimeoutId = null;
+    }
+
+    isGameOverSequenceActive = false;
+}
+
+function shouldGameplayBeActive() {
+    return hasGameStarted
+        && splashOverlay.classList.contains('hidden')
+        && !settingsModal.classList.contains('show')
+        && !gameOverScreen.classList.contains('show')
+        && !isGameOverSequenceActive
+        && !isGameplayPausedBySdk;
+}
+
+function syncGameplayState() {
+    const shouldBeActive = shouldGameplayBeActive();
+
+    if (!window.YandexSDK || !window.YandexSDK.isAvailable || !window.YandexSDK.isAvailable()) {
+        isGameplayMarkedActive = false;
+        return;
+    }
+
+    if (shouldBeActive === isGameplayMarkedActive) {
+        return;
+    }
+
+    isGameplayMarkedActive = shouldBeActive;
+
+    if (shouldBeActive) {
+        window.YandexSDK.startGameplay();
+    } else {
+        window.YandexSDK.stopGameplay();
+    }
+}
+
+function handleYandexPause() {
+    isGameplayPausedBySdk = true;
+
+    if (isDragging) {
+        cancelDrag();
+    }
+
+    audioManager.suspend().catch(() => {});
+    syncGameplayState();
+}
+
+function handleYandexResume() {
+    isGameplayPausedBySdk = false;
+
+    if (hasGameStarted) {
+        audioManager.resume().catch(() => {});
+    }
+
+    syncGameplayState();
+}
+
+async function initializeYandexLifecycle() {
+    if (hasBoundYandexLifecycle) {
+        syncGameplayState();
+        return;
+    }
+
+    if (yandexLifecycleInitPromise) {
+        return yandexLifecycleInitPromise;
+    }
+
+    if (!window.YandexSDK || typeof window.YandexSDK.init !== 'function') {
+        return;
+    }
+
+    yandexLifecycleInitPromise = (async () => {
+        try {
+            await window.YandexSDK.init();
+            hasBoundYandexLifecycle = true;
+
+            if (typeof window.YandexSDK.onPause === 'function') {
+                window.YandexSDK.onPause(handleYandexPause);
+            }
+
+            if (typeof window.YandexSDK.onResume === 'function') {
+                window.YandexSDK.onResume(handleYandexResume);
+            }
+
+            if (typeof window.YandexSDK.isPaused === 'function' && window.YandexSDK.isPaused()) {
+                handleYandexPause();
+            } else {
+                syncGameplayState();
+            }
+        } catch (error) {
+            console.warn('Failed to initialize Yandex lifecycle:', error);
+        } finally {
+            yandexLifecycleInitPromise = null;
+        }
+    })();
+
+    return yandexLifecycleInitPromise;
+}
+
+function setSoundPreference(enabled) {
+    isSoundEnabled = enabled;
+    writeStoredBoolean(SOUND_ENABLED_KEY, enabled);
+    syncSoundToggleUI();
+    audioManager.setSoundEnabled(enabled);
+}
+
+function openSettingsModal() {
+    settingsModal.classList.add('show');
+    settingsModal.setAttribute('aria-hidden', 'false');
+    syncSoundToggleUI();
+    syncGameplayState();
+}
+
+function closeSettingsModal() {
+    settingsModal.classList.remove('show');
+    settingsModal.setAttribute('aria-hidden', 'true');
+    syncGameplayState();
+}
+
+async function initializeLanguage() {
+    applyTranslations(typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE);
+
+    if (!window.YandexSDK || typeof window.YandexSDK.init !== 'function') {
+        return;
+    }
+
+    const applyYandexLanguage = async () => {
+        await window.YandexSDK.init();
+        if (window.YandexSDK.isAvailable() && typeof window.YandexSDK.getLanguage === 'function') {
+            applyTranslations(window.YandexSDK.getLanguage());
+            return true;
+        }
+        return false;
+    };
+
+    try {
+        const applied = await applyYandexLanguage();
+        if (!applied) {
+            setTimeout(() => {
+                applyYandexLanguage().catch(() => {});
+            }, 1000);
+            setTimeout(() => {
+                applyYandexLanguage().catch(() => {});
+            }, 2500);
+        }
+    } catch (error) {
+        console.warn('Failed to resolve Yandex language:', error);
     }
 }
 
@@ -852,10 +1080,18 @@ function saveBestScore(nextBestScore) {
         // ignore storage errors
     }
     updateBestScoreDisplay();
+
+    // Синхронизируем с Yandex SDK
+    if (window.YandexSDK && window.YandexSDK.isAvailable()) {
+        window.YandexSDK.saveBestScore(bestScore);
+        if (!window.YandexSDK.isMethodAvailable || window.YandexSDK.isMethodAvailable('leaderboards.setScore')) {
+            window.YandexSDK.setLeaderboardScore(bestScore);
+        }
+    }
 }
 
 function updateBestScoreDisplay() {
-    const formattedBestScore = bestScore.toLocaleString('en-US');
+    const formattedBestScore = formatNumber(bestScore);
     bestScoreEl.textContent = formattedBestScore;
     gameOverBestEl.textContent = formattedBestScore;
 }
@@ -881,29 +1117,60 @@ function finalizeBestScore() {
     }
 }
 
-function showGameOver() {
-    finalizeBestScore();
-    gameOverScoreEl.textContent = score.toLocaleString('en-US');
-    haptic.error();
+function revealGameOverScreen() {
     gameOverScreen.classList.add('show');
+    isGameOverSequenceActive = false;
+    syncGameplayState();
+
+    if (window.YandexSDK && window.YandexSDK.isAvailable()) {
+        window.YandexSDK.dispatchLevelCompleteEvent(1);
+        window.YandexSDK.showFullscreenAdv({
+            onOpen: () => {
+                audioManager.suspend().catch(() => {});
+                syncGameplayState();
+            },
+            onClose: () => {
+                if (!isGameplayPausedBySdk) {
+                    audioManager.resume().catch(() => {});
+                }
+                syncGameplayState();
+            },
+            onError: () => {
+                if (!isGameplayPausedBySdk) {
+                    audioManager.resume().catch(() => {});
+                }
+                syncGameplayState();
+            }
+        });
+    }
+}
+
+function showGameOver() {
+    if (isGameOverSequenceActive || gameOverScreen.classList.contains('show')) {
+        return;
+    }
+
+    isGameOverSequenceActive = true;
+    finalizeBestScore();
+    gameOverScoreEl.textContent = formatNumber(score);
+    haptic.error();
+    gameContainer.classList.add('game-over-transition');
+    syncGameplayState();
+
+    gameOverRevealTimeoutId = setTimeout(async () => {
+        await waitForGameplayResume();
+        revealGameOverScreen();
+        gameOverRevealTimeoutId = null;
+    }, 850);
 }
 
 function getBlockClass(colorStr) {
     return COLOR_CLASS_BY_TOKEN[colorStr] || 'block-color-purple';
 }
 
-function createBlockElement(colorStr, options = {}) {
+function createBlockElement(colorStr) {
     const block = document.createElement('div');
     block.className = `block-item ${getBlockClass(colorStr)}`;
-    if (options.isDead) {
-        block.classList.add('is-dead');
-    }
-    if (options.isCrystal) {
-        block.classList.add('is-crystal');
-        const crystalMark = document.createElement('div');
-        crystalMark.className = 'crystal-mark';
-        block.appendChild(crystalMark);
-    }
     return block;
 }
 
@@ -927,12 +1194,13 @@ function getCurrentCellSize() {
 function initGame() {
     clearPendingRefill();
     clearPendingGameOver();
-    clearPendingTrayInteraction();
     if (dragElement) {
         dragElement.remove();
         dragElement = null;
     }
     gameContainer.classList.remove('shake');
+    gameContainer.classList.remove('game-over-transition');
+    closeSettingsModal();
     board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
     trayPieces = [null, null, null];
     score = 0;
@@ -940,20 +1208,17 @@ function initGame() {
     isAnimating = false;
     isDragging = false;
     dragPieceIndex = -1;
+    dragPointerType = 'mouse';
     comboStreak = 0;
-    lastPlacedColor = null;
-    crystalCells = new Set();
-    currentLevel = 1;
-    resetAbilityRisk();
-    resetChargeState();
     updateScore();
-    updateLevelUI();
     gameOverScreen.classList.remove('show');
+    isGameOverSequenceActive = false;
     comboDisplay.style.animation = 'none';
     comboDisplay.classList.add('fade-out');
     boardEl.innerHTML = '';
     renderBoard();
     fillTray();
+    syncGameplayState();
 }
 
 function renderBoard() {
@@ -972,30 +1237,19 @@ function renderBoard() {
         for (let c = 0; c < BOARD_SIZE; c++) {
             const cell = document.getElementById(`cell-${r}-${c}`);
             const currentColor = cell.dataset.color || null;
-            const currentCrystal = cell.dataset.crystal === '1';
-            const currentDead = cell.dataset.dead === '1';
             const targetColor = board[r][c];
-            const targetCrystal = crystalCells.has(getCellKey(r, c));
-            const targetDead = isDeadBlock(targetColor);
 
             const hasChild = cell.children.length > 0;
             const shouldHaveChild = targetColor !== null;
-            const logicalStateMatch = currentColor === targetColor
-                && currentCrystal === targetCrystal
-                && currentDead === targetDead;
+            const logicalStateMatch = currentColor === targetColor;
             const domStateMatch = hasChild === shouldHaveChild;
 
             if (!logicalStateMatch || !domStateMatch) {
                 cell.innerHTML = '';
                 if (targetColor) {
-                    cell.appendChild(createBlockElement(targetColor, {
-                        isDead: targetDead,
-                        isCrystal: targetCrystal
-                    }));
+                    cell.appendChild(createBlockElement(targetColor));
                 }
                 cell.dataset.color = targetColor || '';
-                cell.dataset.crystal = targetCrystal ? '1' : '';
-                cell.dataset.dead = targetDead ? '1' : '';
             }
         }
     }
@@ -1175,91 +1429,6 @@ function wouldCreateLineClear(shape, startR, startC) {
     return { rows: rowsToClear, cols: colsToClear };
 }
 
-function rotateTrayPiece(index) {
-    const piece = trayPieces[index];
-    if (!piece || !canRotateTray || isDragging || isAnimating) return;
-
-    trayPieces[index] = {
-        matrix: rotateMatrixClockwise(piece.matrix),
-        color: piece.color
-    };
-
-    playSound('click');
-    renderTray(false, new Set([index]));
-    createPraisePopup('Поворот');
-}
-
-function clearPendingTrayInteraction() {
-    if (!pendingTrayInteraction) return;
-
-    if (pendingTrayInteraction.timerId !== null) {
-        clearTimeout(pendingTrayInteraction.timerId);
-    }
-
-    document.removeEventListener('pointermove', onPendingTrayPointerMove);
-    document.removeEventListener('pointerup', onPendingTrayPointerUp);
-    document.removeEventListener('pointercancel', onPendingTrayPointerCancel);
-    pendingTrayInteraction = null;
-}
-
-function beginPendingDrag(clientX, clientY, index) {
-    clearPendingTrayInteraction();
-    startDrag({ clientX, clientY, preventDefault() {} }, index);
-}
-
-function onPendingTrayPointerMove(e) {
-    if (!pendingTrayInteraction || e.pointerId !== pendingTrayInteraction.pointerId) return;
-
-    const deltaX = e.clientX - pendingTrayInteraction.startX;
-    const deltaY = e.clientY - pendingTrayInteraction.startY;
-    const distance = Math.hypot(deltaX, deltaY);
-
-    if (distance >= ROTATE_DRAG_THRESHOLD) {
-        e.preventDefault();
-        beginPendingDrag(e.clientX, e.clientY, pendingTrayInteraction.index);
-    }
-}
-
-function onPendingTrayPointerUp(e) {
-    if (!pendingTrayInteraction || e.pointerId !== pendingTrayInteraction.pointerId) return;
-
-    const { index } = pendingTrayInteraction;
-    clearPendingTrayInteraction();
-    rotateTrayPiece(index);
-}
-
-function onPendingTrayPointerCancel(e) {
-    if (!pendingTrayInteraction || e.pointerId !== pendingTrayInteraction.pointerId) return;
-    clearPendingTrayInteraction();
-}
-
-function handleTrayPointerDown(e, index) {
-    if (!trayPieces[index] || isDragging || isAnimating) return;
-
-    if (!canRotateTray) {
-        startDrag(e, index);
-        return;
-    }
-
-    e.preventDefault();
-    clearPendingTrayInteraction();
-
-    pendingTrayInteraction = {
-        index,
-        pointerId: e.pointerId,
-        startX: e.clientX,
-        startY: e.clientY,
-        timerId: setTimeout(() => {
-            if (!pendingTrayInteraction || pendingTrayInteraction.index !== index) return;
-            beginPendingDrag(pendingTrayInteraction.startX, pendingTrayInteraction.startY, index);
-        }, ROTATE_HOLD_DELAY)
-    };
-
-    document.addEventListener('pointermove', onPendingTrayPointerMove, { passive: false });
-    document.addEventListener('pointerup', onPendingTrayPointerUp);
-    document.addEventListener('pointercancel', onPendingTrayPointerCancel);
-}
-
 function fillTray() {
     const emptyCount = trayPieces.filter(p => !p).length;
 
@@ -1268,9 +1437,11 @@ function fillTray() {
         isRefillingTray = true;
         renderTray(true);
 
-        const refillStartTimeoutId = setTimeout(() => {
+        const refillStartTimeoutId = setTimeout(async () => {
+            await waitForGameplayResume();
+
             // Получаем все фигуры, которые можно разместить на текущей доске, в порядке убывания сложности
-            const possibleShapeIndices = getDifficultyShapeIndices(getAllPossibleShapes());
+            const possibleShapeIndices = getAllPossibleShapes();
             
             // Если нет доступных фигур, игра закончится в checkGameOver
             // Но если они есть, выбираем 3 такие фигуры, чтобы все они могли быть размещены
@@ -1389,7 +1560,9 @@ function fillTray() {
                 // Если смогли подобрать подходящие фигуры, используем их, иначе берем случайную
                 const randomShape = selectedShapes[i] || cloneShape(SHAPES_DATA[Math.floor(Math.random() * SHAPES_DATA.length)]);
                 
-                const slotFillTimeoutId = setTimeout(() => {
+                const slotFillTimeoutId = setTimeout(async () => {
+                    await waitForGameplayResume();
+
                     trayPieces[i] = randomShape;
                     renderTray(false, new Set([i]));
 
@@ -1424,7 +1597,6 @@ function renderTray(forceEmpty = false, popIndexes = null) {
 
         slot.innerHTML = '';
         slot.onpointerdown = null;
-        slot.classList.toggle('rotatable', Boolean(piece) && canRotateTray);
 
         if (piece) {
             const rows = piece.matrix.length;
@@ -1459,18 +1631,19 @@ function renderTray(forceEmpty = false, popIndexes = null) {
             shapeEl.style.transform = 'none';
 
             slot.appendChild(shapeEl);
-            slot.onpointerdown = e => handleTrayPointerDown(e, i);
+            slot.onpointerdown = e => startDrag(e, i);
         }
     }
 }
 
 function startDrag(e, index) {
-    if (!trayPieces[index] || isDragging || isAnimating) return;
+    if (!trayPieces[index] || isDragging || isAnimating || !canInteractWithGameplay()) return;
 
     e.preventDefault();
 
     const piece = trayPieces[index];
     cellSize = getCurrentCellSize();
+    dragPointerType = e.pointerType === 'touch' ? 'touch' : 'mouse';
 
     haptic.track(e.clientX, e.clientY);
     playSound('pick');
@@ -1530,8 +1703,10 @@ function onDragMove(e) {
 
     haptic.track(e.clientX, e.clientY);
 
-    const dx = (e.clientX - dragStartPointerX) * DRAG_GAIN_X;
-    const dy = (e.clientY - dragStartPointerY) * DRAG_GAIN_Y;
+    const gainX = dragPointerType === 'touch' ? DRAG_GAIN_X : 1;
+    const gainY = dragPointerType === 'touch' ? DRAG_GAIN_Y : 1;
+    const dx = (e.clientX - dragStartPointerX) * gainX;
+    const dy = (e.clientY - dragStartPointerY) * gainY;
     const virtualX = dragAnchorX + dx;
     const virtualY = dragAnchorY + dy;
 
@@ -1692,14 +1867,11 @@ async function endDrag(e) {
     clearPreview();
     isDragging = false;
     dragPieceIndex = -1;
+    dragPointerType = 'mouse';
 
     if (coords && canPlace(piece, coords.r, coords.c)) {
         const blocksPlaced = placeShape(piece, coords.r, coords.c);
         trayPieces[savedDragPieceIndex] = null;
-        if (canRotateTray) {
-            canRotateTray = false;
-            updateChargeUI();
-        }
 
         haptic.confirm(e ? { x: e.clientX, y: e.clientY } : null);
         renderBoard();
@@ -1724,7 +1896,7 @@ async function endDrag(e) {
         }
 
         traySlots[savedDragPieceIndex].innerHTML = '';
-    await checkLines(blocksPlaced, { allowCharge: true });
+        await checkLines(blocksPlaced);
         renderTray();
         fillTray();
     } else {
@@ -1762,6 +1934,7 @@ function cancelDrag() {
     clearPreview();
     isDragging = false;
     dragPieceIndex = -1;
+    dragPointerType = 'mouse';
 
     if (savedDragPieceIndex >= 0 && traySlots[savedDragPieceIndex]?.firstElementChild) {
         traySlots[savedDragPieceIndex].firstElementChild.style.opacity = '1';
@@ -1804,277 +1977,11 @@ function placeShape(shape, startR, startC) {
     }
 
     lastPlacementCoords = { r: startR, c: startC };
-    lastPlacedColor = shape.color;
     playSound('pop');
     return blocksPlaced;
 }
 
-async function resolveBoardAfterAbility() {
-    renderBoard();
-    await checkLines(0, { allowCharge: false });
-    checkGameOver();
-}
-
-function spawnDeadBlock() {
-    const targetCell = pickRandom(getEmptyCells());
-    if (!targetCell) return false;
-
-    board[targetCell.r][targetCell.c] = COLORS.dead;
-    createPraisePopup('Штраф: мертвый блок');
-    return true;
-}
-
-function getAbilityPenaltyChance(color) {
-    const nextCount = lastActivatedAbilityColor === color ? abilityUsageCounts[color] + 1 : 1;
-    if (nextCount <= 1) return 0;
-    if (nextCount === 2) return 0.25;
-    return 0.5;
-}
-
-function registerAbilityActivation(color) {
-    if (lastActivatedAbilityColor !== color) {
-        resetAbilityRisk(color);
-    }
-
-    abilityUsageCounts[color] += 1;
-    lastActivatedAbilityColor = color;
-}
-
-function removeRandomBlocks(count) {
-    const targets = getOccupiedCells(false);
-    let removed = 0;
-
-    while (targets.length > 0 && removed < count) {
-        const targetIndex = Math.floor(Math.random() * targets.length);
-        const [target] = targets.splice(targetIndex, 1);
-        if (removeBoardCell(target.r, target.c)) {
-            removed += 1;
-        }
-    }
-
-    return removed > 0;
-}
-
-function simplifyHardestTrayPiece() {
-    let targetIndex = -1;
-    let maxBlocks = 1;
-
-    for (let i = 0; i < trayPieces.length; i++) {
-        const piece = trayPieces[i];
-        if (!piece) continue;
-
-        const blocksCount = countShapeBlocks(piece);
-        if (blocksCount > maxBlocks) {
-            maxBlocks = blocksCount;
-            targetIndex = i;
-        }
-    }
-
-    if (targetIndex === -1) return false;
-
-    trayPieces[targetIndex] = {
-        matrix: [[1]],
-        color: trayPieces[targetIndex].color
-    };
-    return true;
-}
-
-function removeIsolatedBlock() {
-    const isolatedBlocks = [];
-
-    for (let r = 0; r < BOARD_SIZE; r++) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
-            const color = board[r][c];
-            if (!color || isDeadBlock(color)) continue;
-
-            const neighbors = [
-                [r - 1, c],
-                [r + 1, c],
-                [r, c - 1],
-                [r, c + 1]
-            ];
-            const hasNeighbor = neighbors.some(([nextR, nextC]) => nextR >= 0
-                && nextR < BOARD_SIZE
-                && nextC >= 0
-                && nextC < BOARD_SIZE
-                && board[nextR][nextC] !== null);
-
-            if (!hasNeighbor) {
-                isolatedBlocks.push({ r, c });
-            }
-        }
-    }
-
-    const target = pickRandom(isolatedBlocks);
-    if (!target) return false;
-
-    return removeBoardCell(target.r, target.c);
-}
-
-function applySingleStepGravity() {
-    const nextBoard = board.map(row => row.slice());
-    const nextCrystals = new Set(crystalCells);
-    let moved = false;
-
-    for (let r = BOARD_SIZE - 2; r >= 0; r--) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
-            if (board[r][c] === null || board[r + 1][c] !== null) continue;
-
-            nextBoard[r + 1][c] = board[r][c];
-            nextBoard[r][c] = null;
-            if (nextCrystals.delete(getCellKey(r, c))) {
-                nextCrystals.add(getCellKey(r + 1, c));
-            }
-            moved = true;
-        }
-    }
-
-    if (!moved) return false;
-
-    board = nextBoard;
-    crystalCells = nextCrystals;
-    return true;
-}
-
-function markRandomCrystal() {
-    const eligibleCells = getOccupiedCells(false).filter(({ r, c }) => !crystalCells.has(getCellKey(r, c)));
-    const targetCell = pickRandom(eligibleCells.length > 0 ? eligibleCells : getOccupiedCells(false));
-
-    if (!targetCell) return false;
-
-    crystalCells.add(getCellKey(targetCell.r, targetCell.c));
-    return true;
-}
-
-async function triggerAbility(color) {
-    const penaltyChance = getAbilityPenaltyChance(color);
-    registerAbilityActivation(color);
-
-    triggerCameraShake();
-    playSound('hardPop');
-
-    if (penaltyChance > 0 && Math.random() < penaltyChance) {
-        spawnDeadBlock();
-        await resolveBoardAfterAbility();
-        return false;
-    }
-
-    let boardChanged = false;
-    let trayChanged = false;
-    let feedbackText = `${COLOR_NAMES[color]} эффект`;
-
-    switch (color) {
-        case COLORS.red:
-            boardChanged = removeRandomBlocks(1);
-            feedbackText = boardChanged ? 'Красный: разрушение' : 'Красный: поле пустое';
-            break;
-        case COLORS.blue:
-            trayChanged = simplifyHardestTrayPiece();
-            feedbackText = trayChanged ? 'Синий: фигура упрощена' : 'Синий: упрощать нечего';
-            break;
-        case COLORS.green:
-            boardChanged = removeIsolatedBlock();
-            feedbackText = boardChanged ? 'Зеленый: уборка' : 'Зеленый: изолятов нет';
-            break;
-        case COLORS.orange:
-            boardChanged = applySingleStepGravity();
-            feedbackText = boardChanged ? 'Оранжевый: гравитация' : 'Оранжевый: двигать нечего';
-            break;
-        case COLORS.yellow:
-            boardChanged = markRandomCrystal();
-            feedbackText = boardChanged ? 'Желтый: кристалл' : 'Желтый: поле пустое';
-            break;
-        case COLORS.purple:
-            canRotateTray = true;
-            trayChanged = true;
-            feedbackText = 'Фиолетовый: поворот на ход';
-            break;
-        default:
-            break;
-    }
-
-    createPraisePopup(feedbackText);
-    updateChargeUI();
-
-    if (trayChanged) {
-        renderTray();
-    }
-
-    if (boardChanged) {
-        await resolveBoardAfterAbility();
-    } else {
-        renderBoard();
-        checkGameOver();
-    }
-
-    return true;
-}
-
-async function processChargeColor(color) {
-    if (!color) return;
-
-    if (activeChargeColor === color && isAbilityReady) {
-        activeChargeColor = null;
-        isAbilityReady = false;
-        updateChargeUI();
-        await triggerAbility(color);
-        return;
-    }
-
-    activeChargeColor = color;
-    isAbilityReady = true;
-    createPraisePopup(`Заряд: ${COLOR_NAMES[color]}`);
-    updateChargeUI();
-}
-
-function determineDominantLineColor(linesToClear) {
-    const colorCounts = {};
-    const uniqueCells = new Set();
-
-    linesToClear.forEach(line => {
-        line.forEach(coord => uniqueCells.add(coord));
-    });
-
-    uniqueCells.forEach(coord => {
-        const [r, c] = coord.split(',').map(Number);
-        const color = board[r][c];
-        if (!isChargeableColor(color)) return;
-        colorCounts[color] = (colorCounts[color] || 0) + 1;
-    });
-
-    let maxCount = 0;
-    let candidateColors = [];
-    Object.entries(colorCounts).forEach(([color, count]) => {
-        if (count > maxCount) {
-            maxCount = count;
-            candidateColors = [color];
-        } else if (count === maxCount) {
-            candidateColors.push(color);
-        }
-    });
-
-    if (candidateColors.length === 0) {
-        return isChargeableColor(lastPlacedColor) ? lastPlacedColor : null;
-    }
-
-    if (candidateColors.length === 1) {
-        return candidateColors[0];
-    }
-
-    if (lastPlacedColor && candidateColors.includes(lastPlacedColor)) {
-        return lastPlacedColor;
-    }
-
-    return candidateColors[0];
-}
-
-function maybeAdvanceLevel() {
-    // Система уровней удалена
-    return false;
-}
-
-async function checkLines(blocksPlaced, options = {}) {
-    const allowCharge = options.allowCharge !== false;
+async function checkLines(blocksPlaced) {
     const rowsToClear = [];
     const colsToClear = [];
 
@@ -2108,7 +2015,6 @@ async function checkLines(blocksPlaced, options = {}) {
     });
 
     const totalLines = linesToClear.length;
-    const dominantLineColor = totalLines > 0 ? determineDominantLineColor(linesToClear) : null;
     if (totalLines > 0) {
         comboStreak += 1;
     } else {
@@ -2148,7 +2054,7 @@ async function checkLines(blocksPlaced, options = {}) {
                 const cell = document.getElementById(`cell-${centerR}-${centerC}`);
                 if (cell) {
                     const rect = cell.getBoundingClientRect();
-                    const praiseLines = ['Good!', 'Great!', 'Super!', 'Excellent!', 'Amazing!', 'Incredible!', 'Unbelievable!', 'Godlike!'];
+                    const praiseLines = getMessages().praiseLines;
                     const praise = praiseLines[Math.min(totalLines - 1, praiseLines.length - 1)];
                     createPraisePopup(praise);
 
@@ -2160,7 +2066,7 @@ async function checkLines(blocksPlaced, options = {}) {
 
             const cellsToClear = new Set();
             if (comboStreak >= 2) {
-                comboDisplay.textContent = `Combo x${comboStreak}`;
+                comboDisplay.textContent = `${getMessages().comboLabel} x${comboStreak}`;
                 comboDisplay.classList.remove('fade-out');
                 comboDisplay.style.animation = 'none';
                 void comboDisplay.offsetWidth;
@@ -2193,13 +2099,13 @@ async function checkLines(blocksPlaced, options = {}) {
                 });
             }
 
+            await waitForGameplayResume();
             await new Promise(resolve => setTimeout(resolve, 120));
 
             // Последовательное исчезновение: от ближайших к последней установке к дальним
             for (const item of coordsArray) {
                 const [r, c] = item.coord.split(',').map(Number);
                 const cell = document.getElementById(`cell-${r}-${c}`);
-                const hadCrystal = crystalCells.has(getCellKey(r, c));
                 if (cell) {
                     const colorStr = board[r][c];
                     const rect = cell.getBoundingClientRect();
@@ -2211,13 +2117,9 @@ async function checkLines(blocksPlaced, options = {}) {
                     }
                 }
 
+                await waitForGameplayResume();
                 await new Promise(resolve => setTimeout(resolve, 45));
 
-                if (hadCrystal) {
-                    score += CRYSTAL_SCORE_BONUS * CRYSTAL_MULTIPLIER;
-                    updateScore();
-                }
-                clearCrystalAt(r, c);
                 board[r][c] = null;
                 if (cell) {
                     const blockEl = cell.querySelector('.block-item');
@@ -2227,6 +2129,7 @@ async function checkLines(blocksPlaced, options = {}) {
                 }
             }
 
+            await waitForGameplayResume();
             await new Promise(resolve => setTimeout(resolve, 150));
 
             comboDisplay.style.animation = 'none';
@@ -2239,15 +2142,6 @@ async function checkLines(blocksPlaced, options = {}) {
     }
 
     lastPlacementCoords = null;
-
-    if (maybeAdvanceLevel()) {
-        return totalLines;
-    }
-
-    if (allowCharge && totalLines > 0 && lastPlacedColor && isChargeableColor(lastPlacedColor)) {
-        await processChargeColor(lastPlacedColor);
-    }
-
     return totalLines;
 }
 
@@ -2282,9 +2176,8 @@ function createLandingParticles(x, y, colorStr, particleType = 'landing') {
 }
 
 function updateScore() {
-    scoreEl.textContent = score.toLocaleString('en-US');
+    scoreEl.textContent = formatNumber(score);
 
-    const mainScoreEl = document.getElementById('main-score');
     const duration = 1000;
     const startVal = displayedScore;
     const endVal = score;
@@ -2300,90 +2193,127 @@ function updateScore() {
         const progress = Math.min(elapsed / duration, 1);
         const ease = progress * (2 - progress);
         displayedScore = Math.floor(startVal + (endVal - startVal) * ease);
-        mainScoreEl.textContent = displayedScore.toLocaleString('en-US');
+        mainScoreEl.textContent = formatNumber(displayedScore);
 
         if (progress < 1) {
             requestAnimationFrame(animate);
         } else {
             displayedScore = endVal;
-            mainScoreEl.textContent = displayedScore.toLocaleString('en-US');
+            mainScoreEl.textContent = formatNumber(displayedScore);
         }
     }
     requestAnimationFrame(animate);
 }
 
 function checkGameOver() {
-    clearPendingGameOver();
-
-    if (isRefillingTray || trayPieces.every(piece => !piece)) {
+    if (isGameOverSequenceActive || gameOverScreen.classList.contains('show')) {
         return;
     }
+
+    clearPendingGameOver();
 
     for (let i = 0; i < 3; i++) {
         const piece = trayPieces[i];
         if (!piece) continue;
 
-        const variants = canRotateTray ? getUniqueShapeRotations(piece) : [piece];
-        for (const variant of variants) {
-            for (let r = 0; r < BOARD_SIZE; r++) {
-                for (let c = 0; c < BOARD_SIZE; c++) {
-                    if (canPlace(variant, r, c)) {
-                        return;
-                    }
+        for (let r = 0; r < BOARD_SIZE; r++) {
+            for (let c = 0; c < BOARD_SIZE; c++) {
+                if (canPlace(piece, r, c)) {
+                    return;
                 }
             }
         }
     }
 
-    gameOverTimeoutId = setTimeout(() => {
+    gameOverTimeoutId = setTimeout(async () => {
+        await waitForGameplayResume();
         showGameOver();
         gameOverTimeoutId = null;
     }, 500);
 }
 
+applyTranslations(currentLanguage);
 loadBestScore();
+syncSoundToggleUI();
+void initializeLanguage();
+void initializeYandexLifecycle();
 
-const splashPlayBtn = document.getElementById('splash-play-btn');
-const splashOverlay = document.getElementById('splash-overlay');
-
-// Обработка модального окна настроек
-const settingsModal = document.getElementById('settings-modal');
-const settingsOpenBtn = document.getElementById('settings-open-btn');
-const settingsCloseBtn = document.getElementById('settings-close-btn');
-const musicToggle = document.getElementById('music-toggle');
-
-if (musicToggle) {
-    musicToggle.checked = audioManager.isMusicEnabled;
-    musicToggle.addEventListener('click', (e) => {
-        audioManager.toggleMusic(e.target.checked);
-        audioManager.play('click');
-        haptic.confirm();
-    });
+async function syncBestScoreWithYandex() {
+    if (window.YandexSDK && window.YandexSDK.isAvailable()) {
+        try {
+            const currentLocal = bestScore || 0;
+            const yaScore = await window.YandexSDK.getBestScore();
+            
+            if (typeof yaScore === 'number' && yaScore > currentLocal) {
+                bestScore = yaScore;
+                try {
+                    window.localStorage.setItem(BEST_SCORE_KEY, String(bestScore));
+                } catch (e) {}
+                updateBestScoreDisplay();
+            } else if (currentLocal > (yaScore || 0)) {
+                window.YandexSDK.saveBestScore(currentLocal);
+                if (!window.YandexSDK.isMethodAvailable || window.YandexSDK.isMethodAvailable('leaderboards.setScore')) {
+                    window.YandexSDK.setLeaderboardScore(currentLocal);
+                }
+            }
+        } catch (e) {
+            console.warn('Error syncing Yandex score:', e);
+        }
+    }
 }
 
-if (settingsOpenBtn) {
-    settingsOpenBtn.addEventListener('click', () => {
-        if (settingsModal) settingsModal.classList.remove('hidden');
-        audioManager.play('click');
-    });
+function handleSettingsBackdropClick(event) {
+    if (event.target === settingsModal) {
+        closeSettingsModal();
+    }
 }
 
-if (settingsCloseBtn) {
-    settingsCloseBtn.addEventListener('click', () => {
-        if (settingsModal) settingsModal.classList.add('hidden');
-        audioManager.play('click');
-    });
+function handleGlobalKeydown(event) {
+    if (event.key === 'Escape' && settingsModal.classList.contains('show')) {
+        closeSettingsModal();
+    }
 }
-
 
 function startGame() {
     splashOverlay.classList.add('hidden');
-    audioManager.init();
+    closeSettingsModal();
+    hasGameStarted = true;
+    audioManager.beginGameSession().catch(() => {});
     haptic.confirm();
     initGame();
+    syncGameplayState();
+    void initializeYandexLifecycle();
+
+    if (window.YandexSDK) {
+        if (window.YandexSDK.isAvailable()) {
+            window.YandexSDK.dispatchGameStartEvent();
+            syncGameplayState();
+        } else {
+            // Ждем инициализации
+            setTimeout(() => {
+                if (window.YandexSDK.isAvailable()) {
+                    window.YandexSDK.dispatchGameStartEvent();
+                    syncGameplayState();
+                }
+            }, 1000);
+        }
+        
+        // Синхронизируем рекорды с небольшой задержкой, чтобы SDK точно успело загрузить данные
+        setTimeout(syncBestScoreWithYandex, 500);
+        // Запросим еще раз чуть позже на случай долгой инициализации SDK
+        setTimeout(syncBestScoreWithYandex, 2500);
+    }
 }
 
 splashPlayBtn.addEventListener('click', startGame);
+restartBtn.addEventListener('click', initGame);
+settingsBtn.addEventListener('click', openSettingsModal);
+settingsCloseBtn.addEventListener('click', closeSettingsModal);
+settingsModal.addEventListener('click', handleSettingsBackdropClick);
+musicToggle.addEventListener('change', event => {
+    setSoundPreference(Boolean(event.target.checked));
+});
+document.addEventListener('keydown', handleGlobalKeydown);
 
 document.addEventListener('pointermove', function (e) {
     if (isDragging) e.preventDefault();
