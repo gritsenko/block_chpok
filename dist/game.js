@@ -698,7 +698,9 @@ let gameOverRevealTimeoutId = null;
 let isRefillingTray = false;
 let lastPlacementCoords = null;
 let comboStreak = 0;
-let currentLanguage = DEFAULT_LANGUAGE;
+let currentLanguage = (window.YandexSDK && typeof window.YandexSDK.getLanguage === 'function') 
+    ? window.YandexSDK.getLanguage() 
+    : (typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE);
 let isSoundEnabled = readStoredBoolean(SOUND_ENABLED_KEY, readStoredBoolean(LEGACY_MUSIC_ENABLED_KEY, true));
 let hasGameStarted = false;
 let isGameOverSequenceActive = false;
@@ -1055,7 +1057,11 @@ function closeSettingsModal() {
 }
 
 async function initializeLanguage() {
-    applyTranslations(typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE);
+    let initialLang = typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE;
+    if (window.YandexSDK && typeof window.YandexSDK.getLanguage === 'function') {
+        initialLang = window.YandexSDK.getLanguage();
+    }
+    applyTranslations(initialLang);
 
     if (!window.YandexSDK || typeof window.YandexSDK.init !== 'function') {
         return;
@@ -1148,24 +1154,6 @@ function revealGameOverScreen() {
 
     if (window.YandexSDK && window.YandexSDK.isAvailable()) {
         window.YandexSDK.dispatchLevelCompleteEvent(1);
-        window.YandexSDK.showFullscreenAdv({
-            onOpen: () => {
-                audioManager.suspend().catch(() => {});
-                syncGameplayState();
-            },
-            onClose: () => {
-                if (!isGameplayPausedBySdk) {
-                    audioManager.resume().catch(() => {});
-                }
-                syncGameplayState();
-            },
-            onError: () => {
-                if (!isGameplayPausedBySdk) {
-                    audioManager.resume().catch(() => {});
-                }
-                syncGameplayState();
-            }
-        });
     }
 }
 

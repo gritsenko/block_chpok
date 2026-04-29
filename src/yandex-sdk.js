@@ -12,7 +12,19 @@
     let player = null;
     let isInitialized = false;
     let initPromise = null;
-    let language = typeof navigator !== 'undefined' ? navigator.language || 'en' : 'en';
+
+    function getLangFromUrl() {
+        if (typeof window !== 'undefined' && window.location && window.location.search) {
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const lang = params.get('lang');
+                if (lang) return lang;
+            } catch(e) {}
+        }
+        return null;
+    }
+
+    let language = getLangFromUrl() || (typeof navigator !== 'undefined' ? navigator.language || 'en' : 'en');
     let isPlatformPaused = false;
     let isGameplayActive = false;
     let lifecycleEventsBound = false;
