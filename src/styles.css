@@ -502,6 +502,9 @@ body {
 .btn-yellow { background: #fbbf24; box-shadow: 0 5px 0 #d97706; color: #854d0e; }
 .btn-yellow:active { box-shadow: 0 2px 0 #d97706; }
 
+.btn-outline { background: transparent; border: 2px solid rgba(255, 255, 255, 0.5); color: white; box-shadow: none; }
+.btn-outline:active { background: rgba(255, 255, 255, 0.1); transform: translateY(2px); box-shadow: none; }
+
 .btn:disabled {
     cursor: default;
     opacity: 0.55;
@@ -696,7 +699,7 @@ body {
     outline-offset: 3px;
 }
 
-#game-over {
+#game-over, #second-chance-modal {
     position: absolute;
     top: 0;
     left: 0;
@@ -715,17 +718,45 @@ body {
     transition: opacity 0.35s ease, transform 0.35s ease;
 }
 
-#game-over.show {
+#game-over.show, #second-chance-modal.show {
     visibility: visible;
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0) scale(1);
 }
 
-#game-over h2 {
+#game-over h2, #second-chance-modal h2 {
     color: white;
     font-size: 40px;
     margin-bottom: 10px;
+    text-align: center;
+}
+
+#second-chance-modal p {
+    color: white;
+    font-size: 20px;
+    margin-bottom: 24px;
+    text-align: center;
+    padding: 0 20px;
+}
+
+.reward-shapes-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+    min-height: 80px;
+}
+
+.reward-shape-slot {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 60px;
+    height: 60px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
 }
 
 .game-over-stats {
@@ -748,6 +779,23 @@ body {
     font-size: 20px;
     border-radius: 30px;
     height: auto;
+}
+
+.second-chance-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 280px;
+}
+
+.second-chance-btn {
+    flex: none;
+    padding: 16px 20px;
+    font-size: 18px;
+    border-radius: 25px;
+    height: auto;
+    width: 100%;
 }
 
 .particle {

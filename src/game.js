@@ -583,6 +583,10 @@ const I18N = {
         comboLabel: 'Combo',
         splashLogoAlt: 'Block Chpok',
         headerLogoAlt: 'Block Chpok Logo',
+        secondChanceTitle: 'No moves!',
+        secondChanceText: 'Watch an ad to get a new set of shapes?',
+        secondChanceAdBtn: 'Watch Ad',
+        secondChanceSkipBtn: 'No thanks',
         praiseLines: ['Good!', 'Great!', 'Super!', 'Excellent!', 'Amazing!', 'Incredible!', 'Unbelievable!', 'Godlike!']
     },
     ru: {
@@ -603,6 +607,10 @@ const I18N = {
         comboLabel: 'Комбо',
         splashLogoAlt: 'Block Chpok',
         headerLogoAlt: 'Логотип Block Chpok',
+        secondChanceTitle: 'Нет ходов!',
+        secondChanceText: 'Посмотреть рекламу и получить новые фигуры?',
+        secondChanceAdBtn: 'Посмотреть',
+        secondChanceSkipBtn: 'Нет, спасибо',
         praiseLines: ['Хорошо!', 'Отлично!', 'Супер!', 'Превосходно!', 'Потрясающе!', 'Невероятно!', 'Феноменально!', 'Легендарно!']
     }
 };
@@ -698,6 +706,8 @@ let isGameplayPausedBySdk = false;
 let isGameplayMarkedActive = false;
 let hasBoundYandexLifecycle = false;
 let yandexLifecycleInitPromise = null;
+let hasUsedSecondChance = false;
+let pendingRewardShapes = null;
 
 const gameContainer = document.querySelector('.game-container');
 const boardEl = document.getElementById('board');
@@ -717,6 +727,14 @@ const gameOverScoreEl = document.getElementById('game-over-score');
 const gameOverBestLabelEl = document.getElementById('game-over-best-label');
 const gameOverBestEl = document.getElementById('game-over-best');
 const restartBtn = document.getElementById('restart-btn');
+
+const secondChanceModal = document.getElementById('second-chance-modal');
+const secondChanceTitleEl = document.getElementById('second-chance-title');
+const secondChanceTextEl = document.getElementById('second-chance-text');
+const secondChanceShapesEl = document.getElementById('second-chance-shapes');
+const secondChanceAdBtn = document.getElementById('second-chance-ad-btn');
+const secondChanceSkipBtn = document.getElementById('second-chance-skip-btn');
+
 const splashPlayBtn = document.getElementById('splash-play-btn');
 const splashOverlay = document.getElementById('splash-overlay');
 const splashLogoEl = document.getElementById('splash-logo');
@@ -829,6 +847,11 @@ function applyTranslations(language) {
     settingsCloseBtn.setAttribute('aria-label', messages.closeSettings);
     splashLogoEl.alt = messages.splashLogoAlt;
     headerLogoEl.alt = messages.headerLogoAlt;
+    
+    if (secondChanceTitleEl) secondChanceTitleEl.textContent = messages.secondChanceTitle;
+    if (secondChanceTextEl) secondChanceTextEl.textContent = messages.secondChanceText;
+    if (secondChanceAdBtn) secondChanceAdBtn.textContent = messages.secondChanceAdBtn;
+    if (secondChanceSkipBtn) secondChanceSkipBtn.textContent = messages.secondChanceSkipBtn;
 
     applyLocalizedLogos(currentLanguage);
     syncSoundToggleUI();
@@ -922,6 +945,7 @@ function shouldGameplayBeActive() {
         && splashOverlay.classList.contains('hidden')
         && !settingsModal.classList.contains('show')
         && !gameOverScreen.classList.contains('show')
+        && !secondChanceModal.classList.contains('show')
         && !isGameOverSequenceActive
         && !isGameplayPausedBySdk;
 }
@@ -1145,6 +1169,77 @@ function revealGameOverScreen() {
     }
 }
 
+function generateRewardShapes() {
+    const newShapes = [];
+    newShapes.push({ matrix: [[1]], color: COLORS.yellow }); // Одиночный квадратик
+    
+    const possibleShapes = getAllPossibleShapes();
+    for (let i = 0; i < 2; i++) {
+        if (possibleShapes.length > i) {
+            newShapes.push(cloneShape(SHAPES_DATA[possibleShapes[i]]));
+        } else {
+            newShapes.push(cloneShape(SHAPES_DATA[Math.floor(Math.random() * SHAPES_DATA.length)]));
+        }
+    }
+    
+    // Перемешиваем чтобы квадратик не всегда был первым
+    newShapes.sort(() => Math.random() - 0.5);
+    return newShapes;
+}
+
+function renderRewardShapes(shapes) {
+    if (!secondChanceShapesEl) return;
+    secondChanceShapesEl.innerHTML = '';
+    
+    shapes.forEach(piece => {
+        const slot = document.createElement('div');
+        slot.className = 'reward-shape-slot';
+        
+        const rows = piece.matrix.length;
+        const cols = piece.matrix[0].length;
+        const gap = 2;
+
+        const trayCellSize = 16; // Фиксированный размер ячейки для предпросмотра
+
+        const container = document.createElement('div');
+        container.innerHTML = createShapeHTML(piece, false);
+        const shapeEl = container.firstElementChild;
+
+        const w = cols * trayCellSize + (cols - 1) * gap;
+        const h = rows * trayCellSize + (rows - 1) * gap;
+
+        shapeEl.style.width = `${w}px`;
+        shapeEl.style.height = `${h}px`;
+        shapeEl.style.transform = 'none';
+
+        slot.appendChild(shapeEl);
+        secondChanceShapesEl.appendChild(slot);
+    });
+}
+
+function revealSecondChanceScreen() {
+    secondChanceModal.classList.add('show');
+    isGameOverSequenceActive = false;
+    syncGameplayState();
+}
+
+function showSecondChance() {
+    if (isGameOverSequenceActive || secondChanceModal.classList.contains('show')) {
+        return;
+    }
+
+    isGameOverSequenceActive = true;
+    haptic.error();
+    gameContainer.classList.add('game-over-transition');
+    syncGameplayState();
+
+    gameOverRevealTimeoutId = setTimeout(async () => {
+        await waitForGameplayResume();
+        revealSecondChanceScreen();
+        gameOverRevealTimeoutId = null;
+    }, 850);
+}
+
 function showGameOver() {
     if (isGameOverSequenceActive || gameOverScreen.classList.contains('show')) {
         return;
@@ -1210,8 +1305,10 @@ function initGame() {
     dragPieceIndex = -1;
     dragPointerType = 'mouse';
     comboStreak = 0;
+    hasUsedSecondChance = false;
     updateScore();
     gameOverScreen.classList.remove('show');
+    secondChanceModal.classList.remove('show');
     isGameOverSequenceActive = false;
     comboDisplay.style.animation = 'none';
     comboDisplay.classList.add('fade-out');
@@ -2206,7 +2303,7 @@ function updateScore() {
 }
 
 function checkGameOver() {
-    if (isGameOverSequenceActive || gameOverScreen.classList.contains('show')) {
+    if (isGameOverSequenceActive || gameOverScreen.classList.contains('show') || secondChanceModal.classList.contains('show')) {
         return;
     }
 
@@ -2227,7 +2324,15 @@ function checkGameOver() {
 
     gameOverTimeoutId = setTimeout(async () => {
         await waitForGameplayResume();
-        showGameOver();
+        
+        if (!hasUsedSecondChance && window.YandexSDK && window.YandexSDK.isAvailable()) {
+            pendingRewardShapes = generateRewardShapes();
+            renderRewardShapes(pendingRewardShapes);
+            showSecondChance();
+        } else {
+            showGameOver();
+        }
+        
         gameOverTimeoutId = null;
     }, 500);
 }
@@ -2307,9 +2412,83 @@ function startGame() {
 
 splashPlayBtn.addEventListener('click', startGame);
 restartBtn.addEventListener('click', initGame);
+
+if (secondChanceAdBtn) {
+    secondChanceAdBtn.addEventListener('click', () => {
+        if (!window.YandexSDK || !window.YandexSDK.isAvailable()) {
+            // Фолбэк, если SDK вдруг недоступен
+            window.open('https://gritsenko.biz', '_blank');
+            applySecondChanceReward();
+            return;
+        }
+
+        window.YandexSDK.showRewardedVideo({
+            onOpen: () => {
+                audioManager.suspend().catch(() => {});
+                syncGameplayState();
+            },
+            onRewarded: () => {
+                applySecondChanceReward();
+            },
+            onClose: () => {
+                if (!isGameplayPausedBySdk) {
+                    audioManager.resume().catch(() => {});
+                }
+                
+                // Если награда не получена, показываем game over
+                if (!hasUsedSecondChance) {
+                    pendingRewardShapes = null;
+                    secondChanceModal.classList.remove('show');
+                    finalizeBestScore();
+                    gameOverScoreEl.textContent = formatNumber(score);
+                    revealGameOverScreen();
+                } else {
+                    syncGameplayState();
+                }
+            },
+            onError: () => {
+                if (!isGameplayPausedBySdk) {
+                    audioManager.resume().catch(() => {});
+                }
+                pendingRewardShapes = null;
+                secondChanceModal.classList.remove('show');
+                finalizeBestScore();
+                gameOverScoreEl.textContent = formatNumber(score);
+                revealGameOverScreen();
+            }
+        });
+    });
+}
+
+if (secondChanceSkipBtn) {
+    secondChanceSkipBtn.addEventListener('click', () => {
+        pendingRewardShapes = null;
+        secondChanceModal.classList.remove('show');
+        finalizeBestScore();
+        gameOverScoreEl.textContent = formatNumber(score);
+        revealGameOverScreen();
+    });
+}
+
+function applySecondChanceReward() {
+    hasUsedSecondChance = true;
+    secondChanceModal.classList.remove('show');
+    isGameOverSequenceActive = false;
+    gameContainer.classList.remove('game-over-transition');
+    
+    if (pendingRewardShapes) {
+        for (let i = 0; i < 3; i++) {
+            trayPieces[i] = pendingRewardShapes[i];
+        }
+    }
+    pendingRewardShapes = null;
+    
+    renderTray();
+    syncGameplayState();
+}
+
 settingsBtn.addEventListener('click', openSettingsModal);
 settingsCloseBtn.addEventListener('click', closeSettingsModal);
-settingsModal.addEventListener('click', handleSettingsBackdropClick);
 musicToggle.addEventListener('change', event => {
     setSoundPreference(Boolean(event.target.checked));
 });
@@ -2321,5 +2500,19 @@ document.addEventListener('pointermove', function (e) {
 
 window.addEventListener('resize', refreshLayoutMetrics);
 window.addEventListener('orientationchange', refreshLayoutMetrics);
+
+const debugGameOverBtn = document.getElementById('debug-gameover-btn');
+if (debugGameOverBtn && (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')) {
+    debugGameOverBtn.style.display = 'block';
+    debugGameOverBtn.addEventListener('click', () => {
+        if (!hasUsedSecondChance) {
+            pendingRewardShapes = generateRewardShapes();
+            renderRewardShapes(pendingRewardShapes);
+            showSecondChance();
+        } else {
+            showGameOver();
+        }
+    });
+}
 
 window.initGame = initGame;
