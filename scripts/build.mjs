@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,3 +47,11 @@ for (const fileName of passthroughFiles) {
 console.log(
     `Built ${countFiles(distDir)} files from ${relative(rootDir, sourceDir)} to ${relative(rootDir, distDir)}.`
 );
+
+try {
+    const zipPath = resolve(rootDir, 'block_chpock.zip');
+    execSync(`tar -a -c -f "${zipPath}" *`, { cwd: distDir, stdio: 'inherit' });
+    console.log(`Created archive at ${relative(rootDir, zipPath)}`);
+} catch (error) {
+    console.error('Failed to create zip archive:', error.message);
+}
