@@ -557,6 +557,8 @@ if (document.readyState === 'complete') {
 // --- НАСТРОЙКИ И ДАННЫЕ ---
 const BOARD_SIZE = 8;
 const BEST_SCORE_KEY = 'block-chpok-best-score';
+const CRYSTALS_KEY = 'block-chpok-crystals';
+const CRYSTAL_SPAWN_CHANCE = 0.12;
 const SOUND_ENABLED_KEY = 'block-chpok-sound-enabled';
 const LEGACY_MUSIC_ENABLED_KEY = 'block-chpok-music-enabled';
 const DEFAULT_LANGUAGE = 'en';
@@ -572,6 +574,8 @@ const I18N = {
         play: 'Play',
         gameOverTitle: 'Game Over!',
         scoreLabel: 'Score:',
+        scoreLabelShort: 'SCORE:',
+        crystalsLabel: 'CRYSTALS:',
         bestLabel: 'Best:',
         restart: 'Play Again',
         settingsTitle: 'Settings',
@@ -596,6 +600,8 @@ const I18N = {
         play: 'Играть',
         gameOverTitle: 'Игра окончена!',
         scoreLabel: 'Счет:',
+        scoreLabelShort: 'СЧЁТ:',
+        crystalsLabel: 'КРИСТАЛЛЫ:',
         bestLabel: 'Рекорд:',
         restart: 'Играть снова',
         settingsTitle: 'Настройки',
@@ -687,9 +693,11 @@ const SHAPES_DATA = [
 
 // --- СОСТОЯНИЕ ИГРЫ ---
 let board = [];
+let boardCrystals = [];
 let trayPieces = [null, null, null];
 let score = 0;
 let bestScore = 0;
+let crystals = 0;
 let displayedScore = 0;
 let scoreAnimationToken = 0;
 let refillTimeoutIds = [];
@@ -721,6 +729,9 @@ const traySlots = [
 const scoreEl = document.getElementById('score');
 const mainScoreEl = document.getElementById('main-score');
 const bestScoreEl = document.getElementById('best-score');
+const crystalCountEl = document.getElementById('crystal-count');
+const scoreLabelEl = document.getElementById('score-label');
+const crystalsLabelEl = document.getElementById('crystals-label');
 const comboDisplay = document.getElementById('combo-display');
 const gameOverScreen = document.getElementById('game-over');
 const gameOverTitleEl = document.getElementById('game-over-title');
@@ -736,6 +747,46 @@ const secondChanceTextEl = document.getElementById('second-chance-text');
 const secondChanceShapesEl = document.getElementById('second-chance-shapes');
 const secondChanceAdBtn = document.getElementById('second-chance-ad-btn');
 const secondChanceSkipBtn = document.getElementById('second-chance-skip-btn');
+
+const characterStateLayers = (() => {
+    const map = {};
+    document.querySelectorAll('.header-branch-banner-state').forEach(el => {
+        const key = el.dataset.characterState;
+        if (key) map[key] = el;
+    });
+    return map;
+})();
+let characterStateRevertTimeoutId = null;
+let currentCharacterState = 'base';
+const CHARACTER_STATE_HOLD_MS = 500;
+
+function setCharacterState(state) {
+    if (!characterStateLayers[state]) state = 'base';
+    if (characterStateRevertTimeoutId !== null) {
+        clearTimeout(characterStateRevertTimeoutId);
+        characterStateRevertTimeoutId = null;
+    }
+    if (currentCharacterState === state) {
+        if (state === 'fire' || state === 'sad') {
+            characterStateRevertTimeoutId = setTimeout(() => {
+                characterStateRevertTimeoutId = null;
+                setCharacterState('base');
+            }, CHARACTER_STATE_HOLD_MS);
+        }
+        return;
+    }
+    Object.entries(characterStateLayers).forEach(([key, el]) => {
+        if (key === state) el.classList.add('active');
+        else el.classList.remove('active');
+    });
+    currentCharacterState = state;
+    if (state === 'fire' || state === 'sad') {
+        characterStateRevertTimeoutId = setTimeout(() => {
+            characterStateRevertTimeoutId = null;
+            setCharacterState('base');
+        }, CHARACTER_STATE_HOLD_MS);
+    }
+}
 
 const splashPlayBtn = document.getElementById('splash-play-btn');
 const splashOverlay = document.getElementById('splash-overlay');
@@ -818,8 +869,9 @@ function syncSoundToggleUI() {
 
 function refreshVisibleScoreText() {
     scoreEl.textContent = formatNumber(score);
-    mainScoreEl.textContent = formatNumber(displayedScore);
+    if (mainScoreEl) mainScoreEl.textContent = formatNumber(displayedScore);
     gameOverScoreEl.textContent = formatNumber(score);
+    if (crystalCountEl) crystalCountEl.textContent = formatNumber(crystals);
     updateBestScoreDisplay();
 }
 
@@ -842,13 +894,15 @@ function applyTranslations(language) {
     gameOverTitleEl.textContent = messages.gameOverTitle;
     gameOverScoreLabelEl.textContent = messages.scoreLabel;
     gameOverBestLabelEl.textContent = messages.bestLabel;
+    if (scoreLabelEl) scoreLabelEl.textContent = messages.scoreLabelShort;
+    if (crystalsLabelEl) crystalsLabelEl.textContent = messages.crystalsLabel;
     restartBtn.textContent = messages.restart;
     settingsTitleEl.textContent = messages.settingsTitle;
     musicToggleLabelEl.textContent = messages.soundLabel;
     settingsBtn.setAttribute('aria-label', messages.openSettings);
     settingsCloseBtn.setAttribute('aria-label', messages.closeSettings);
-    splashLogoEl.alt = messages.splashLogoAlt;
-    headerLogoEl.alt = messages.headerLogoAlt;
+    if (splashLogoEl) splashLogoEl.alt = messages.splashLogoAlt;
+    if (headerLogoEl) headerLogoEl.alt = messages.headerLogoAlt;
     
     if (secondChanceTitleEl) secondChanceTitleEl.textContent = messages.secondChanceTitle;
     if (secondChanceTextEl) secondChanceTextEl.textContent = messages.secondChanceText;
@@ -1102,6 +1156,31 @@ function loadBestScore() {
     updateBestScoreDisplay();
 }
 
+function loadCrystals() {
+    try {
+        const raw = window.localStorage.getItem(CRYSTALS_KEY);
+        const parsed = Number(raw);
+        crystals = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    } catch (error) {
+        crystals = 0;
+    }
+    updateCrystalsDisplay();
+}
+
+function saveCrystals() {
+    try {
+        window.localStorage.setItem(CRYSTALS_KEY, String(crystals));
+    } catch (error) {
+        // ignore storage errors
+    }
+}
+
+function updateCrystalsDisplay() {
+    if (crystalCountEl) {
+        crystalCountEl.textContent = formatNumber(crystals);
+    }
+}
+
 function saveBestScore(nextBestScore) {
     bestScore = nextBestScore;
     try {
@@ -1122,7 +1201,9 @@ function saveBestScore(nextBestScore) {
 
 function updateBestScoreDisplay() {
     const formattedBestScore = formatNumber(bestScore);
-    bestScoreEl.textContent = formattedBestScore;
+    if (bestScoreEl) {
+        bestScoreEl.textContent = formattedBestScore;
+    }
     gameOverBestEl.textContent = formattedBestScore;
 }
 
@@ -1218,6 +1299,7 @@ function showSecondChance() {
 
     isGameOverSequenceActive = true;
     haptic.error();
+    setCharacterState('sad');
     gameContainer.classList.add('game-over-transition');
     syncGameplayState();
 
@@ -1237,6 +1319,7 @@ function showGameOver() {
     finalizeBestScore();
     gameOverScoreEl.textContent = formatNumber(score);
     haptic.error();
+    setCharacterState('sad');
     gameContainer.classList.add('game-over-transition');
     syncGameplayState();
 
@@ -1283,8 +1366,10 @@ function initGame() {
     }
     gameContainer.classList.remove('shake');
     gameContainer.classList.remove('game-over-transition');
+    setCharacterState('base');
     closeSettingsModal();
     board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+    boardCrystals = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(false));
     trayPieces = [null, null, null];
     score = 0;
     displayedScore = 0;
@@ -1323,18 +1408,24 @@ function renderBoard() {
             const cell = document.getElementById(`cell-${r}-${c}`);
             const currentColor = cell.dataset.color || null;
             const targetColor = board[r][c];
+            const hasCrystal = Boolean(boardCrystals[r] && boardCrystals[r][c]);
+            const currentCrystal = cell.dataset.crystal === '1';
 
             const hasChild = cell.children.length > 0;
             const shouldHaveChild = targetColor !== null;
             const logicalStateMatch = currentColor === targetColor;
             const domStateMatch = hasChild === shouldHaveChild;
+            const crystalStateMatch = currentCrystal === hasCrystal;
 
-            if (!logicalStateMatch || !domStateMatch) {
+            if (!logicalStateMatch || !domStateMatch || !crystalStateMatch) {
                 cell.innerHTML = '';
                 if (targetColor) {
-                    cell.appendChild(createBlockElement(targetColor));
+                    const block = createBlockElement(targetColor);
+                    if (hasCrystal) block.classList.add('has-crystal');
+                    cell.appendChild(block);
                 }
                 cell.dataset.color = targetColor || '';
+                cell.dataset.crystal = hasCrystal ? '1' : '';
             }
         }
     }
@@ -1734,6 +1825,8 @@ function startDrag(e, index) {
     playSound('pick');
     haptic({ x: e.clientX, y: e.clientY });
 
+    setCharacterState('wait');
+
     isDragging = true;
     dragPieceIndex = index;
 
@@ -1982,6 +2075,9 @@ async function endDrag(e) {
 
         traySlots[savedDragPieceIndex].innerHTML = '';
         await checkLines(blocksPlaced);
+        if (currentCharacterState === 'wait') {
+            setCharacterState('base');
+        }
         renderTray();
         fillTray();
     } else {
@@ -1990,6 +2086,9 @@ async function endDrag(e) {
             traySlots[savedDragPieceIndex].firstElementChild.style.opacity = '1';
         }
         traySlots[savedDragPieceIndex].style.opacity = '1';
+        if (currentCharacterState === 'wait') {
+            setCharacterState('base');
+        }
     }
 
     haptic.release();
@@ -2025,6 +2124,10 @@ function cancelDrag() {
         traySlots[savedDragPieceIndex].firstElementChild.style.opacity = '1';
     }
 
+    if (currentCharacterState === 'wait') {
+        setCharacterState('base');
+    }
+
     haptic.release();
 }
 
@@ -2056,6 +2159,7 @@ function placeShape(shape, startR, startC) {
         for (let c = 0; c < shape.matrix[0].length; c++) {
             if (shape.matrix[r][c]) {
                 board[startR + r][startC + c] = shape.color;
+                boardCrystals[startR + r][startC + c] = Math.random() < CRYSTAL_SPAWN_CHANCE;
                 blocksPlaced++;
             }
         }
@@ -2205,6 +2309,13 @@ async function checkLines(blocksPlaced) {
                 await waitForGameplayResume();
                 await new Promise(resolve => setTimeout(resolve, 45));
 
+                if (boardCrystals[r] && boardCrystals[r][c]) {
+                    crystals += 1;
+                    boardCrystals[r][c] = false;
+                    updateCrystalsDisplay();
+                    saveCrystals();
+                    setCharacterState('fire');
+                }
                 board[r][c] = null;
                 if (cell) {
                     const blockEl = cell.querySelector('.block-item');
@@ -2327,6 +2438,7 @@ function checkGameOver() {
 
 applyTranslations(currentLanguage);
 loadBestScore();
+loadCrystals();
 syncSoundToggleUI();
 void initializeLanguage();
 void initializeYandexLifecycle();
