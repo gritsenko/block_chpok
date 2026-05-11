@@ -93,9 +93,12 @@
                 bindLifecycleEvents();
                 console.log('[Yandex SDK] Инициализирован');
 
+                // LoadingAPI.ready() must be called BEFORE the game becomes playable
+                // (требование платформы 1.19). Player/storage init продолжается в фоне.
+                gameReady();
+
                 await initPlayer();
                 await setupSafeStorage();
-                gameReady();
 
                 return ysdk;
             } catch (error) {

@@ -1,3 +1,15 @@
+// Блокируем выделение текста, контекстное меню и drag-and-drop изображений
+// (требования платформы 1.6.1.8 / 1.6.2.7).
+(function suppressNativeInteractionGestures() {
+    const stop = function(event) {
+        event.preventDefault();
+    };
+    window.addEventListener('contextmenu', stop, { passive: false });
+    window.addEventListener('selectstart', stop, { passive: false });
+    window.addEventListener('dragstart', stop, { passive: false });
+    document.addEventListener('gesturestart', stop, { passive: false });
+})();
+
 // --- AUDIO MANAGER (Web Audio API) ---
 class AudioManager {
     constructor() {
@@ -561,6 +573,7 @@ const CRYSTALS_KEY = 'block-chpok-crystals';
 const CRYSTAL_SPAWN_CHANCE = 0.12;
 const SOUND_ENABLED_KEY = 'block-chpok-sound-enabled';
 const LEGACY_MUSIC_ENABLED_KEY = 'block-chpok-music-enabled';
+const DEBUG_LANGUAGE_KEY = 'block-chpok-debug-language';
 const DEFAULT_LANGUAGE = 'en';
 const LOGO_BY_LANGUAGE = {
     en: 'logo.png',
@@ -706,9 +719,23 @@ let gameOverRevealTimeoutId = null;
 let isRefillingTray = false;
 let lastPlacementCoords = null;
 let comboStreak = 0;
-let currentLanguage = (window.YandexSDK && typeof window.YandexSDK.getLanguage === 'function') 
-    ? window.YandexSDK.getLanguage() 
-    : (typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE);
+const isLocalhost = typeof window !== 'undefined'
+    && (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost');
+
+function readDebugLanguageOverride() {
+    if (!isLocalhost) return null;
+    try {
+        const raw = window.localStorage.getItem(DEBUG_LANGUAGE_KEY);
+        return (raw && Object.prototype.hasOwnProperty.call(I18N, raw)) ? raw : null;
+    } catch {
+        return null;
+    }
+}
+
+let currentLanguage = readDebugLanguageOverride()
+    || ((window.YandexSDK && typeof window.YandexSDK.getLanguage === 'function')
+        ? window.YandexSDK.getLanguage()
+        : (typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE));
 let isSoundEnabled = readStoredBoolean(SOUND_ENABLED_KEY, readStoredBoolean(LEGACY_MUSIC_ENABLED_KEY, true));
 let hasGameStarted = false;
 let isGameOverSequenceActive = false;
@@ -1111,6 +1138,12 @@ function closeSettingsModal() {
 }
 
 async function initializeLanguage() {
+    const debugOverride = readDebugLanguageOverride();
+    if (debugOverride) {
+        applyTranslations(debugOverride);
+        return;
+    }
+
     let initialLang = typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE;
     if (window.YandexSDK && typeof window.YandexSDK.getLanguage === 'function') {
         initialLang = window.YandexSDK.getLanguage();
@@ -2596,7 +2629,7 @@ window.addEventListener('resize', refreshLayoutMetrics);
 window.addEventListener('orientationchange', refreshLayoutMetrics);
 
 const debugGameOverBtn = document.getElementById('debug-gameover-btn');
-if (debugGameOverBtn && (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')) {
+if (debugGameOverBtn && isLocalhost) {
     debugGameOverBtn.style.display = 'block';
     debugGameOverBtn.addEventListener('click', () => {
         if (!hasUsedSecondChance) {
@@ -2606,6 +2639,27 @@ if (debugGameOverBtn && (window.location.hostname === '127.0.0.1' || window.loca
         } else {
             showGameOver();
         }
+    });
+}
+
+const debugLangBtn = document.getElementById('debug-lang-btn');
+if (debugLangBtn && isLocalhost) {
+    const SUPPORTED_LANGUAGES = Object.keys(I18N);
+    const updateDebugLangLabel = () => {
+        debugLangBtn.textContent = `Lang: ${currentLanguage.toUpperCase()}`;
+    };
+    debugLangBtn.style.display = 'block';
+    updateDebugLangLabel();
+    debugLangBtn.addEventListener('click', () => {
+        const currentIndex = SUPPORTED_LANGUAGES.indexOf(currentLanguage);
+        const nextLang = SUPPORTED_LANGUAGES[(currentIndex + 1) % SUPPORTED_LANGUAGES.length];
+        applyTranslations(nextLang);
+        try {
+            window.localStorage.setItem(DEBUG_LANGUAGE_KEY, currentLanguage);
+        } catch {
+            // ignore storage errors
+        }
+        updateDebugLangLabel();
     });
 }
 
