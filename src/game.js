@@ -569,8 +569,6 @@ if (document.readyState === 'complete') {
 // --- НАСТРОЙКИ И ДАННЫЕ ---
 const BOARD_SIZE = 8;
 const BEST_SCORE_KEY = 'block-chpok-best-score';
-const CRYSTALS_KEY = 'block-chpok-crystals';
-const CRYSTAL_SPAWN_CHANCE = 0.12;
 const SOUND_ENABLED_KEY = 'block-chpok-sound-enabled';
 const LEGACY_MUSIC_ENABLED_KEY = 'block-chpok-music-enabled';
 const DEBUG_LANGUAGE_KEY = 'block-chpok-debug-language';
@@ -588,7 +586,7 @@ const I18N = {
         gameOverTitle: 'Game Over!',
         scoreLabel: 'Score:',
         scoreLabelShort: 'SCORE:',
-        crystalsLabel: 'CRYSTALS:',
+        crystalsLabel: 'BEST SCORE:',
         bestLabel: 'Best:',
         restart: 'Play Again',
         settingsTitle: 'Settings',
@@ -614,7 +612,7 @@ const I18N = {
         gameOverTitle: 'Игра окончена!',
         scoreLabel: 'Счет:',
         scoreLabelShort: 'СЧЁТ:',
-        crystalsLabel: 'КРИСТАЛЛЫ:',
+        crystalsLabel: 'ЛУЧШИЙ СЧЁТ:',
         bestLabel: 'Рекорд:',
         restart: 'Играть снова',
         settingsTitle: 'Настройки',
@@ -706,11 +704,9 @@ const SHAPES_DATA = [
 
 // --- СОСТОЯНИЕ ИГРЫ ---
 let board = [];
-let boardCrystals = [];
 let trayPieces = [null, null, null];
 let score = 0;
 let bestScore = 0;
-let crystals = 0;
 let displayedScore = 0;
 let scoreAnimationToken = 0;
 let refillTimeoutIds = [];
@@ -898,7 +894,6 @@ function refreshVisibleScoreText() {
     scoreEl.textContent = formatNumber(score);
     if (mainScoreEl) mainScoreEl.textContent = formatNumber(displayedScore);
     gameOverScoreEl.textContent = formatNumber(score);
-    if (crystalCountEl) crystalCountEl.textContent = formatNumber(crystals);
     updateBestScoreDisplay();
 }
 
@@ -1189,31 +1184,6 @@ function loadBestScore() {
     updateBestScoreDisplay();
 }
 
-function loadCrystals() {
-    try {
-        const raw = window.localStorage.getItem(CRYSTALS_KEY);
-        const parsed = Number(raw);
-        crystals = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-    } catch (error) {
-        crystals = 0;
-    }
-    updateCrystalsDisplay();
-}
-
-function saveCrystals() {
-    try {
-        window.localStorage.setItem(CRYSTALS_KEY, String(crystals));
-    } catch (error) {
-        // ignore storage errors
-    }
-}
-
-function updateCrystalsDisplay() {
-    if (crystalCountEl) {
-        crystalCountEl.textContent = formatNumber(crystals);
-    }
-}
-
 function saveBestScore(nextBestScore) {
     bestScore = nextBestScore;
     try {
@@ -1233,9 +1203,12 @@ function saveBestScore(nextBestScore) {
 }
 
 function updateBestScoreDisplay() {
-    const formattedBestScore = formatNumber(bestScore);
+    const formattedBestScore = formatNumber(Math.max(bestScore, score));
     if (bestScoreEl) {
         bestScoreEl.textContent = formattedBestScore;
+    }
+    if (crystalCountEl) {
+        crystalCountEl.textContent = formattedBestScore;
     }
     gameOverBestEl.textContent = formattedBestScore;
 }
@@ -1402,7 +1375,6 @@ function initGame() {
     setCharacterState('base');
     closeSettingsModal();
     board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
-    boardCrystals = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(false));
     trayPieces = [null, null, null];
     score = 0;
     displayedScore = 0;
@@ -1441,24 +1413,19 @@ function renderBoard() {
             const cell = document.getElementById(`cell-${r}-${c}`);
             const currentColor = cell.dataset.color || null;
             const targetColor = board[r][c];
-            const hasCrystal = Boolean(boardCrystals[r] && boardCrystals[r][c]);
-            const currentCrystal = cell.dataset.crystal === '1';
 
             const hasChild = cell.children.length > 0;
             const shouldHaveChild = targetColor !== null;
             const logicalStateMatch = currentColor === targetColor;
             const domStateMatch = hasChild === shouldHaveChild;
-            const crystalStateMatch = currentCrystal === hasCrystal;
 
-            if (!logicalStateMatch || !domStateMatch || !crystalStateMatch) {
+            if (!logicalStateMatch || !domStateMatch) {
                 cell.innerHTML = '';
                 if (targetColor) {
                     const block = createBlockElement(targetColor);
-                    if (hasCrystal) block.classList.add('has-crystal');
                     cell.appendChild(block);
                 }
                 cell.dataset.color = targetColor || '';
-                cell.dataset.crystal = hasCrystal ? '1' : '';
             }
         }
     }
@@ -2192,7 +2159,6 @@ function placeShape(shape, startR, startC) {
         for (let c = 0; c < shape.matrix[0].length; c++) {
             if (shape.matrix[r][c]) {
                 board[startR + r][startC + c] = shape.color;
-                boardCrystals[startR + r][startC + c] = Math.random() < CRYSTAL_SPAWN_CHANCE;
                 blocksPlaced++;
             }
         }
@@ -2261,6 +2227,7 @@ async function checkLines(blocksPlaced) {
         isAnimating = true;
 
         try {
+            setCharacterState('fire');
             renderBoard();
 
             const linePoints = totalLines * 100;
@@ -2342,13 +2309,6 @@ async function checkLines(blocksPlaced) {
                 await waitForGameplayResume();
                 await new Promise(resolve => setTimeout(resolve, 45));
 
-                if (boardCrystals[r] && boardCrystals[r][c]) {
-                    crystals += 1;
-                    boardCrystals[r][c] = false;
-                    updateCrystalsDisplay();
-                    saveCrystals();
-                    setCharacterState('fire');
-                }
                 board[r][c] = null;
                 if (cell) {
                     const blockEl = cell.querySelector('.block-item');
@@ -2471,7 +2431,6 @@ function checkGameOver() {
 
 applyTranslations(currentLanguage);
 loadBestScore();
-loadCrystals();
 syncSoundToggleUI();
 void initializeLanguage();
 void initializeYandexLifecycle();

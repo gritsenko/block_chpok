@@ -128,10 +128,8 @@ body {
 
 .header-branch-banner {
     width: 100%;
-    height: 100%;
+    height: auto;
     max-width: 460px;
-    object-fit: contain;
-    object-position: center bottom;
     filter: drop-shadow(0 7px 10px rgba(70, 38, 18, 0.28));
     transform: translateY(2px);
 }
@@ -141,6 +139,9 @@ body {
     left: 50%;
     bottom: 0;
     transform: translate(-50%, 2px);
+    width: 100%;
+    height: auto;
+    max-width: 460px;
     opacity: 0;
     transition: opacity 0.225s ease-in-out;
     pointer-events: none;
@@ -305,31 +306,17 @@ body {
     background: linear-gradient(180deg, #f6d6a3 0%, #dfb177 100%);
     border: 2px solid #9b6134;
     box-shadow: inset 0 2px 0 rgba(255, 245, 225, 0.55), inset 0 -3px 5px rgba(120, 69, 30, 0.2), 0 3px 0 #8a542d, 0 5px 10px rgba(74, 39, 19, 0.2);
-    padding: 8px 12px 8px 10px;
-    gap: 10px;
-    justify-content: flex-end;
+    padding: 8px 12px;
+    justify-content: center;
     min-height: 40px;
     text-shadow: none;
     border-radius: 12px;
 }
 
-.crystal-icon {
-    width: 32px;
-    height: 36px;
-    flex: 0 0 auto;
-    filter: drop-shadow(0 2px 3px rgba(20, 8, 60, 0.45));
-}
-
-.crystal-icon svg {
-    width: 100%;
-    height: 100%;
-    display: block;
-}
-
 .crystal-panel-text {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     gap: 2px;
     line-height: 1;
 }
@@ -507,25 +494,6 @@ body {
 
 .block-color-red {
     background-image: url('assets/theme/block-red-v2.png');
-}
-
-.block-item.has-crystal::after {
-    content: '';
-    position: absolute;
-    inset: 14% 20%;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 32'><defs><linearGradient id='gOuter' x1='0' y1='0' x2='0' y2='1'><stop offset='0%25' stop-color='%23ffe8fb'/><stop offset='35%25' stop-color='%23ff9fe1'/><stop offset='75%25' stop-color='%23ff5fb8'/><stop offset='100%25' stop-color='%23c41f7d'/></linearGradient><linearGradient id='gTop' x1='0.5' y1='0' x2='0.5' y2='1'><stop offset='0%25' stop-color='%23ffffff'/><stop offset='60%25' stop-color='%23fff0fb'/><stop offset='100%25' stop-color='%23ffc3ec'/></linearGradient><linearGradient id='gLeft' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%23ff8fd4'/><stop offset='100%25' stop-color='%23d6358a'/></linearGradient><linearGradient id='gRight' x1='1' y1='0' x2='0' y2='1'><stop offset='0%25' stop-color='%23ffb0e1'/><stop offset='100%25' stop-color='%23e94aa0'/></linearGradient><radialGradient id='gGlow' cx='0.5' cy='0.5' r='0.5'><stop offset='0%25' stop-color='%23ffffff' stop-opacity='0.55'/><stop offset='100%25' stop-color='%23ffffff' stop-opacity='0'/></radialGradient></defs><ellipse cx='12' cy='16' rx='13' ry='15' fill='url(%23gGlow)'/><polygon points='12,1 22,11 12,31 2,11' fill='url(%23gOuter)' stroke='%23a01863' stroke-width='1.2' stroke-linejoin='round'/><polygon points='12,1 18,11 12,15 6,11' fill='url(%23gTop)'/><polygon points='6,11 12,15 12,31 2,11' fill='url(%23gLeft)' opacity='0.92'/><polygon points='18,11 12,15 12,31 22,11' fill='url(%23gRight)' opacity='0.85'/><polygon points='12,15 14,22 12,31 10,22' fill='%23ffffff' opacity='0.35'/><polygon points='9,4 13,4 11,9 8,8' fill='%23ffffff' opacity='0.85'/><polygon points='14,5 16,5 15,8' fill='%23ffffff' opacity='0.7'/></svg>");
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: contain;
-    filter: drop-shadow(0 2px 4px rgba(120, 12, 70, 0.55));
-    pointer-events: none;
-    z-index: 2;
-    animation: crystalShine 2.4s ease-in-out infinite;
-}
-
-@keyframes crystalShine {
-    0%, 100% { transform: scale(1); filter: drop-shadow(0 2px 4px rgba(120, 12, 70, 0.55)) brightness(1); }
-    50% { transform: scale(1.06); filter: drop-shadow(0 2px 8px rgba(255, 120, 200, 0.85)) brightness(1.15); }
 }
 
 @keyframes popIn {
@@ -984,10 +952,6 @@ body {
         padding: 8px 12px;
         min-height: 32px;
     }
-    .crystal-icon {
-        width: 26px;
-        height: 30px;
-    }
     .crystal-panel-text > span:last-child,
     .score-panel-body {
         font-size: 18px;
@@ -1025,10 +989,6 @@ body {
     .stat-panel-ribbon {
         font-size: 10px;
         padding: 2px 8px 3px;
-    }
-    .crystal-icon {
-        width: 22px;
-        height: 26px;
     }
     .crystal-panel-text > span:last-child,
     .score-panel-body {
@@ -1153,10 +1113,6 @@ body {
     .stat-panel-ribbon {
         font-size: 9px;
         padding: 2px 6px;
-    }
-    .crystal-icon {
-        width: 20px;
-        height: 22px;
     }
     .crystal-panel-text > span:last-child,
     .score-panel-body {
