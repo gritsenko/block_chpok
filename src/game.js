@@ -1029,9 +1029,7 @@ function clearPendingGameOver() {
 }
 
 function shouldGameplayBeActive() {
-    return hasGameStarted
-        && splashOverlay.classList.contains('hidden')
-        && !settingsModal.classList.contains('show')
+    return !settingsModal.classList.contains('show')
         && !gameOverScreen.classList.contains('show')
         && !secondChanceModal.classList.contains('show')
         && !isGameOverSequenceActive
@@ -2514,7 +2512,7 @@ splashOverlay.addEventListener('pointerdown', (e) => {
     }
 });
 
-restartBtn.addEventListener('click', initGame);
+restartBtn.addEventListener('click', startGame);
 
 if (secondChanceAdBtn) {
     secondChanceAdBtn.addEventListener('click', () => {
@@ -2642,3 +2640,4 @@ if (debugLangBtn && isLocalhost) {
 }
 
 window.initGame = initGame;
+window.startGame = startGame;
