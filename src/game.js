@@ -2507,7 +2507,13 @@ function startGame() {
     }
 }
 
-splashPlayBtn.addEventListener('click', startGame);
+// Start game on tap anywhere in the splash overlay
+splashOverlay.addEventListener('pointerdown', (e) => {
+    if (!hasGameStarted) {
+        startGame();
+    }
+});
+
 restartBtn.addEventListener('click', initGame);
 
 if (secondChanceAdBtn) {
