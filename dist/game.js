@@ -828,6 +828,16 @@ const localizedLogoEls = [splashLogoEl, headerLogoEl];
 
 audioManager.setSoundEnabled(isSoundEnabled);
 
+function updateSplashPlayButtonPosition() {
+    if (!splashPlayBtn || !boardEl) return;
+
+    const boardRect = boardEl.getBoundingClientRect();
+    if (boardRect.width <= 0 || boardRect.height <= 0) return;
+
+    splashPlayBtn.style.left = `${boardRect.left + boardRect.width / 2}px`;
+    splashPlayBtn.style.top = `${boardRect.top + boardRect.height / 2}px`;
+}
+
 function normalizeLanguage(lang) {
     if (typeof lang !== 'string') return DEFAULT_LANGUAGE;
     return lang.toLowerCase().startsWith('ru') ? 'ru' : 'en';
@@ -2133,6 +2143,7 @@ function cancelDrag() {
 
 function refreshLayoutMetrics() {
     cellSize = getCurrentCellSize();
+    updateSplashPlayButtonPosition();
 }
 
 function canPlace(shape, startR, startC) {
@@ -2586,6 +2597,8 @@ document.addEventListener('pointermove', function (e) {
 
 window.addEventListener('resize', refreshLayoutMetrics);
 window.addEventListener('orientationchange', refreshLayoutMetrics);
+window.addEventListener('load', refreshLayoutMetrics);
+requestAnimationFrame(refreshLayoutMetrics);
 
 const debugGameOverBtn = document.getElementById('debug-gameover-btn');
 if (debugGameOverBtn && isLocalhost) {
