@@ -1,0 +1,17 @@
+- generic [active] [ref=e1]:
+  - button "Играть" [ref=e3] [cursor=pointer]
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - button "Открыть настройки" [ref=e6] [cursor=pointer]
+      - img "Логотип Block Chpok"
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - generic [ref=e9]: "СЧЁТ:"
+          - generic [ref=e11]: "0"
+        - generic [ref=e14]:
+          - generic [ref=e15]: "ЛУЧШИЙ СЧЁТ:"
+          - generic [ref=e16]: "0"
+      - generic [ref=e17]: "0"
+      - generic [ref=e18]: "0"
+    - button "Debug Game Over" [ref=e25] [cursor=pointer]
+    - 'button "Lang: RU" [ref=e26] [cursor=pointer]'

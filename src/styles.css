@@ -110,10 +110,10 @@ body {
 
 .header {
     position: relative;
-    margin-bottom: 14px;
+    margin-bottom: 0;
     padding-top: 26px;
-    padding-bottom: 4px;
-    min-height: 168px;
+    padding-bottom: 0;
+    min-height: 206px;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -171,7 +171,8 @@ body {
     justify-content: space-between;
     align-items: flex-end;
     gap: 12px;
-    margin-top: -28px;
+    margin-top: auto;
+    margin-bottom: -8px;
     padding: 0 6px;
     z-index: 3;
     flex-shrink: 0;
@@ -358,6 +359,7 @@ body {
     padding: 12px;
     box-shadow: 0 14px 28px rgba(115, 61, 36, 0.25), 0 4px 12px rgba(255, 255, 255, 0.2);
     margin-bottom: 20px;
+    margin-top: 0;
     position: relative;
     z-index: 2;
 }
@@ -552,6 +554,8 @@ body {
 .tray-slot {
     flex: 1;
     aspect-ratio: 1 / 1;
+    min-width: 0;
+    min-height: 0;
     background: linear-gradient(180deg, rgba(122, 76, 55, 0.92) 0%, rgba(95, 55, 38, 0.92) 100%);
     border: 1px solid rgba(255, 228, 196, 0.3);
     border-radius: 18px;
@@ -559,8 +563,15 @@ body {
     justify-content: center;
     align-items: center;
     position: relative;
+    overflow: hidden;
     box-shadow: inset 0 3px 8px rgba(255, 238, 217, 0.08), 0 8px 14px rgba(79, 41, 20, 0.2);
     z-index: 20;
+}
+
+.tray-slot > .tray-shape {
+    position: absolute;
+    inset: 0;
+    margin: auto;
 }
 
 .tray-slot .block-item {
@@ -963,15 +974,17 @@ body {
         padding: 10px 12px 12px;
     }
     .header {
-        min-height: 138px;
-        margin-bottom: 10px;
+        min-height: 188px;
+        margin-bottom: 0;
         padding-top: 34px;
+        padding-bottom: 0;
     }
     .header-banner {
         /* height and absolute positioning */
     }
     .header-stats {
-        margin-top: -22px;
+        margin-top: auto;
+        margin-bottom: -8px;
     }
     .stat-panel-body {
         font-size: 18px;
@@ -998,15 +1011,17 @@ body {
         padding: 8px 12px;
     }
     .header {
-        min-height: 118px;
-        margin-bottom: 8px;
+        min-height: 164px;
+        margin-bottom: 0;
         padding-top: 10px;
+        padding-bottom: 0;
     }
     .header-banner {
         /* height and absolute positioning */
     }
     .header-stats {
-        margin-top: -22px;
+        margin-top: auto;
+        margin-bottom: -8px;
     }
     .stat-panel-body {
         font-size: 16px;
@@ -1097,15 +1112,17 @@ body {
         padding: 5px 10px;
     }
     .header {
-        min-height: 96px;
-        margin-bottom: 5px;
-        padding-top: 6px;
+        min-height: 150px;
+        margin-bottom: 0;
+        padding-top: 12px;
+        padding-bottom: 0;
     }
     .header-banner {
         /* height and absolute positioning */
     }
     .header-stats {
-        margin-top: -18px;
+        margin-top: auto;
+        margin-bottom: -6px;
     }
     .stat-panel-body {
         font-size: 14px;
@@ -1124,6 +1141,9 @@ body {
         width: 44px;
         height: 44px;
         top: 4px;
+    }
+    .board-container {
+        margin-top: auto;
     }
     .tray,
     .board-container {

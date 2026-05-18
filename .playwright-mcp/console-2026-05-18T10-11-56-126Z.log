@@ -1,0 +1,21 @@
+[   12091ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/sdk.js:0
+[   12092ms] [LOG] [Yandex SDK] Скрипт загружен @ http://127.0.0.1:3000/src/yandex-sdk.js:636
+[   12124ms] [WARNING] [Yandex SDK] YaGames не найден. SDK недоступен. @ http://127.0.0.1:3000/src/yandex-sdk.js:85
+[   12273ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/sdk.js:0
+[   12276ms] [LOG] [Yandex SDK] Скрипт загружен @ http://127.0.0.1:3000/src/yandex-sdk.js:636
+[   12290ms] [WARNING] [Yandex SDK] YaGames не найден. SDK недоступен. @ http://127.0.0.1:3000/src/yandex-sdk.js:85
+[   13772ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/sdk.js:0
+[   13775ms] [LOG] [Yandex SDK] Скрипт загружен @ http://127.0.0.1:3000/src/yandex-sdk.js:636
+[   13789ms] [WARNING] [Yandex SDK] YaGames не найден. SDK недоступен. @ http://127.0.0.1:3000/src/yandex-sdk.js:85
+[   26541ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/sdk.js:0
+[   26547ms] [LOG] [Yandex SDK] Скрипт загружен @ http://127.0.0.1:3000/src/yandex-sdk.js:636
+[   26560ms] [WARNING] [Yandex SDK] YaGames не найден. SDK недоступен. @ http://127.0.0.1:3000/src/yandex-sdk.js:85
+[   48972ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/sdk.js:0
+[   48976ms] [LOG] [Yandex SDK] Скрипт загружен @ http://127.0.0.1:3000/src/yandex-sdk.js:636
+[   48988ms] [WARNING] [Yandex SDK] YaGames не найден. SDK недоступен. @ http://127.0.0.1:3000/src/yandex-sdk.js:85
+[   64141ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/sdk.js:0
+[   64145ms] [LOG] [Yandex SDK] Скрипт загружен @ http://127.0.0.1:3000/src/yandex-sdk.js:636
+[   64156ms] [WARNING] [Yandex SDK] YaGames не найден. SDK недоступен. @ http://127.0.0.1:3000/src/yandex-sdk.js:85
+[   64231ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3000/sdk.js:0
+[   64237ms] [LOG] [Yandex SDK] Скрипт загружен @ http://127.0.0.1:3000/src/yandex-sdk.js:636
+[   64248ms] [WARNING] [Yandex SDK] YaGames не найден. SDK недоступен. @ http://127.0.0.1:3000/src/yandex-sdk.js:85

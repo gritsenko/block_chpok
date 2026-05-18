@@ -1810,9 +1810,9 @@ function renderTray(forceEmpty = false, popIndexes = null) {
             const w = cols * trayCellSize + (cols - 1) * gap;
             const h = rows * trayCellSize + (rows - 1) * gap;
 
+            shapeEl.classList.add('tray-shape');
             shapeEl.style.width = `${w}px`;
             shapeEl.style.height = `${h}px`;
-            shapeEl.style.transform = 'none';
 
             slot.appendChild(shapeEl);
             slot.onpointerdown = e => startDrag(e, i);
