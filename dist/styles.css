@@ -1119,7 +1119,7 @@ body {
         justify-content: space-between;
     }
     .crystal-panel {
-        display: flex;
+        display: none;
     }
     .score-panel {
         min-width: 100px;
