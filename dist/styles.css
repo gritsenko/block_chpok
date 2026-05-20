@@ -77,7 +77,7 @@ body {
 
 .game-container {
     width: 100%;
-    max-width: min(430px, calc(100svh * 0.75 - 105px));
+    max-width: min(430px, calc(100svh * 0.75 - 165px));
     height: 100%;
     max-height: 932px;
     display: flex;
@@ -951,6 +951,15 @@ body {
         box-shadow: none;
         max-height: 100svh;
     }
+    .header-stats {
+        justify-content: space-between;
+    }
+    .crystal-panel {
+        display: flex;
+    }
+    .score-panel, .stat-panel {
+        min-width: 110px;
+    }
 }
 
 @media (min-aspect-ratio: 1 / 1) {
@@ -958,7 +967,7 @@ body {
         padding: 12px 0;
     }
     .game-container {
-        width: min(100%, 430px, max(300px, calc(100svh - 320px)));
+        width: min(100%, 430px, calc(100svh * 0.75 - 110px));
         max-height: 780px;
         padding: 10px 12px 12px;
     }
@@ -996,6 +1005,7 @@ body {
 @media (max-height: 750px) {
     .game-container {
         padding: 8px 12px;
+        max-width: min(430px, calc(100svh * 0.75 - 110px));
     }
     .header {
         min-height: 118px;
@@ -1091,8 +1101,8 @@ body {
         height: 100svh;
     }
     .game-container {
-        width: min(100%, calc(100svh - 110px));
-        max-width: 380px;
+        width: 100%;
+        max-width: min(380px, calc(100svh * 0.75 - 65px));
         max-height: 100svh;
         padding: 5px 10px;
     }
@@ -1106,6 +1116,16 @@ body {
     }
     .header-stats {
         margin-top: -18px;
+        justify-content: space-between;
+    }
+    .crystal-panel {
+        display: flex;
+    }
+    .score-panel {
+        min-width: 100px;
+    }
+    .stat-panel {
+        min-width: 100px;
     }
     .stat-panel-body {
         font-size: 14px;
