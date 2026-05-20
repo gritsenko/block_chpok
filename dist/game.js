@@ -183,8 +183,19 @@ class AudioManager {
 const audioManager = new AudioManager();
 
 // --- HAPTIC FEEDBACK SYSTEM ---
+const canUseMatchMedia = typeof window !== 'undefined' && typeof window.matchMedia === 'function';
+const isCoarsePointerDevice = canUseMatchMedia && window.matchMedia('(pointer: coarse)').matches;
+const prefersReducedMotion = canUseMatchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reportedHardwareConcurrency = typeof navigator !== 'undefined' && Number.isFinite(navigator.hardwareConcurrency)
+    ? navigator.hardwareConcurrency
+    : 8;
+const reportedDeviceMemory = typeof navigator !== 'undefined' && typeof navigator.deviceMemory === 'number'
+    ? navigator.deviceMemory
+    : 8;
 const supportsHaptics = typeof window !== 'undefined'
-    && (window.matchMedia('(pointer: coarse)').matches || /iPhone|iPad|iPod/.test(navigator.userAgent));
+    && (isCoarsePointerDevice || /iPhone|iPad|iPod/.test(navigator.userAgent));
+const isLowPerfParticleMode = prefersReducedMotion
+    || (isCoarsePointerDevice && (reportedHardwareConcurrency <= 6 || reportedDeviceMemory <= 4));
 
 const hapticFallbackState = {
     labelEl: null,
@@ -312,37 +323,107 @@ class ParticleSystem {
     constructor() {
         this.canvas = document.getElementById('particles-canvas');
         this.ctx = null;
+        this.gameContainer = document.querySelector('.game-container');
         this.particles = [];
         this.landingParticles = [];
+        this.animationFrameId = 0;
+        this.lastFrameTime = 0;
+        this.config = {
+            particleCountScale: isLowPerfParticleMode ? 0.35 : (isCoarsePointerDevice ? 0.5 : 1),
+            landingParticleCount: isLowPerfParticleMode ? 1 : 2,
+            shadowBlur: isLowPerfParticleMode ? 0 : (isCoarsePointerDevice ? 3 : 6),
+            maxParticles: isLowPerfParticleMode ? 56 : (isCoarsePointerDevice ? 84 : 144),
+            maxLandingParticles: isLowPerfParticleMode ? 12 : (isCoarsePointerDevice ? 18 : 30)
+        };
         
-        if (this.canvas) {
-            this.ctx = this.canvas.getContext('2d');
+        if (this.canvas && this.gameContainer) {
+            this.ctx = this.canvas.getContext('2d', {
+                alpha: true
+            });
             this.resizeCanvas();
-            this.animate();
+            this.setCanvasVisibility(false);
             
             window.addEventListener('resize', () => this.resizeCanvas());
         }
     }
     
     resizeCanvas() {
-        if (!this.canvas) return;
+        if (!this.canvas || !this.gameContainer) return;
         
         // Размеры подстраиваются под весь игровой контейнер
-        const gameContainer = document.querySelector('.game-container');
-        const containerRect = gameContainer.getBoundingClientRect();
+        const containerRect = this.gameContainer.getBoundingClientRect();
+        const width = Math.max(1, Math.round(containerRect.width));
+        const height = Math.max(1, Math.round(containerRect.height));
         
         // Устанавливаем размеры canvas
-        this.canvas.width = containerRect.width;
-        this.canvas.height = containerRect.height;
+        this.canvas.width = width;
+        this.canvas.height = height;
         
         // Позиционируем canvas внутри game-container
         this.canvas.style.position = 'absolute';
         this.canvas.style.top = '0';
         this.canvas.style.left = '0';
     }
+
+    getRelativeCanvasPoint(x, y) {
+        if (!this.canvas || !this.gameContainer) return null;
+
+        const containerRect = this.gameContainer.getBoundingClientRect();
+        const relX = x - containerRect.left;
+        const relY = y - containerRect.top;
+
+        if (relX < 0 || relX > this.canvas.width || relY < 0 || relY > this.canvas.height) {
+            return null;
+        }
+
+        return { x: relX, y: relY };
+    }
+
+    trimParticleBuffer(list, maxCount) {
+        const overflow = list.length - maxCount;
+
+        if (overflow > 0) {
+            list.splice(0, overflow);
+        }
+    }
+
+    hasActiveParticles() {
+        return this.particles.length > 0 || this.landingParticles.length > 0;
+    }
+
+    setCanvasVisibility(isVisible) {
+        if (!this.canvas) return;
+
+        this.canvas.style.display = isVisible ? 'block' : 'none';
+        this.canvas.style.visibility = isVisible ? 'visible' : 'hidden';
+        this.canvas.style.opacity = isVisible ? '1' : '0';
+    }
+
+    clearCanvas() {
+        if (!this.ctx) return;
+
+        const ctx = this.ctx;
+        ctx.globalCompositeOperation = 'copy';
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        ctx.globalCompositeOperation = 'source-over';
+    }
+
+    ensureAnimation() {
+        if (!this.ctx || this.animationFrameId) return;
+
+        this.setCanvasVisibility(true);
+        this.lastFrameTime = 0;
+        this.animationFrameId = requestAnimationFrame(timestamp => this.animate(timestamp));
+    }
     
     createParticles(x, y, colorStr, particleSize = 14, count = 7, particleType = 'explosion') {
         if (!this.ctx) return;
+
+        const origin = this.getRelativeCanvasPoint(x, y);
+        if (!origin) return;
         
         let color;
         if (particleType === 'tray') {
@@ -354,7 +435,7 @@ class ParticleSystem {
         }
         
         // Адаптируем количество частиц под мобильные устройства
-        const particleCount = window.innerWidth <= 768 ? Math.floor(count * 0.6) : count;
+        const particleCount = Math.max(1, Math.round(count * this.config.particleCountScale));
         
         for (let i = 0; i < particleCount; i++) {
             const angle = Math.random() * Math.PI * 2;
@@ -362,17 +443,6 @@ class ParticleSystem {
             const tx = Math.cos(angle) * distance;
             const ty = Math.sin(angle) * distance;
             const rot = Math.random() * 360;
-            
-            // Преобразуем глобальные координаты в координаты canvas
-            const gameContainer = document.querySelector('.game-container');
-            const containerRect = gameContainer.getBoundingClientRect();
-            const relX = x - containerRect.left;
-            const relY = y - containerRect.top;
-            
-            // Если частица находится за пределами canvas, не добавляем её
-            if (relX < 0 || relX > this.canvas.width || relY < 0 || relY > this.canvas.height) {
-                continue;
-            }
             
             // Настройки для частиц в трее
             let adjustedSize = particleSize;
@@ -388,8 +458,8 @@ class ParticleSystem {
             }
             
             this.particles.push({
-                x: relX,
-                y: relY,
+                x: origin.x,
+                y: origin.y,
                 color: color,
                 size: adjustedSize,
                 tx: adjustedTx,
@@ -400,10 +470,16 @@ class ParticleSystem {
                 type: particleType
             });
         }
+
+        this.trimParticleBuffer(this.particles, this.config.maxParticles);
+        this.ensureAnimation();
     }
     
     createLandingParticles(x, y, colorStr, particleType = 'landing') {
         if (!this.ctx) return;
+
+        const origin = this.getRelativeCanvasPoint(x, y);
+        if (!origin) return;
         
         let color;
         if (particleType === 'tray') {
@@ -415,26 +491,15 @@ class ParticleSystem {
         }
         
         // Уменьшенное количество частиц приземления
-        for (let i = 0; i < 2; i++) {
+        for (let i = 0; i < this.config.landingParticleCount; i++) {
             const angle = Math.random() * Math.PI * 2;
             const distance = Math.random() * 40 + 10;
             const tx = Math.cos(angle) * distance;
             const ty = Math.sin(angle) * distance;
             
-            // Преобразуем глобальные координаты в координаты canvas
-            const gameContainer = document.querySelector('.game-container');
-            const containerRect = gameContainer.getBoundingClientRect();
-            const relX = x - containerRect.left;
-            const relY = y - containerRect.top;
-            
-            // Если частица находится за пределами canvas, не добавляем её
-            if (relX < 0 || relX > this.canvas.width || relY < 0 || relY > this.canvas.height) {
-                continue;
-            }
-            
             // Настройки для частиц в трее
             let adjustedSize = 12;
-            let adjustedOpacity = 0.3;
+            let adjustedOpacity = 0.6;
             let adjustedLife = 0.6;
             let adjustedTx = tx;
             let adjustedTy = ty;
@@ -448,8 +513,8 @@ class ParticleSystem {
             }
             
             this.landingParticles.push({
-                x: relX,
-                y: relY,
+                x: origin.x,
+                y: origin.y,
                 color: color,
                 size: adjustedSize,
                 opacity: adjustedOpacity,
@@ -460,99 +525,144 @@ class ParticleSystem {
                 type: particleType
             });
         }
+
+        this.trimParticleBuffer(this.landingParticles, this.config.maxLandingParticles);
+        this.ensureAnimation();
     }
     
-    update() {
-        // Обновляем обычные частицы
-        this.particles = this.particles.filter(particle => {
-            particle.life -= 1/60; // приблизительно 60fps
-            return particle.life > 0;
-        });
-        
-        // Обновляем частицы приземления
-        this.landingParticles = this.landingParticles.filter(particle => {
-            particle.life -= 1/60; // приблизительно 60fps
-            return particle.life > 0;
-        });
+    updateParticles(list, deltaSeconds) {
+        let writeIndex = 0;
+
+        for (let readIndex = 0; readIndex < list.length; readIndex++) {
+            const particle = list[readIndex];
+            particle.life -= deltaSeconds;
+
+            if (particle.life > 0) {
+                list[writeIndex] = particle;
+                writeIndex += 1;
+            }
+        }
+
+        list.length = writeIndex;
+    }
+
+    update(deltaSeconds) {
+        this.updateParticles(this.particles, deltaSeconds);
+        this.updateParticles(this.landingParticles, deltaSeconds);
     }
     
     render() {
         if (!this.ctx) return;
+        const ctx = this.ctx;
         
         // Очищаем область для перерисовки
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.clearCanvas();
+
+        if (!this.hasActiveParticles()) {
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+            this.setCanvasVisibility(false);
+            return;
+        }
         
         // Рисуем обычные частицы
-        this.particles.forEach(particle => {
-            const progress = 1 - (particle.life / particle.startLife);
+        for (let i = 0; i < this.particles.length; i++) {
+            const particle = this.particles[i];
+            const lifeRatio = particle.life / particle.startLife;
+            const progress = 1 - lifeRatio;
             const currentSize = particle.size * (1 - progress);
-            const currentOpacity = Math.min(1, particle.life / particle.startLife);
-            
-            this.ctx.save();
+            const currentOpacity = Math.min(1, lifeRatio);
             
             // Для частиц в трее устанавливаем пониженную прозрачность
             let effectiveOpacity = currentOpacity;
             if (particle.type === 'tray') {
                 effectiveOpacity *= 0.5; // 0.5 прозрачнее
             }
-            
-            this.ctx.globalAlpha = effectiveOpacity;
-            this.ctx.fillStyle = particle.color;
-            this.ctx.shadowColor = particle.color;
-            
-            // Для частиц в трее уменьшаем размытие тени
-            if (particle.type === 'tray') {
-                this.ctx.shadowBlur = 3;
-            } else {
-                this.ctx.shadowBlur = 6;
+
+            if (currentSize <= 0.35 || effectiveOpacity <= 0.01) {
+                continue;
             }
             
-            this.ctx.beginPath();
-            this.ctx.arc(
+            ctx.globalAlpha = effectiveOpacity;
+            ctx.fillStyle = particle.color;
+            
+            // Для частиц в трее уменьшаем размытие тени
+            if (this.config.shadowBlur > 0) {
+                ctx.shadowColor = particle.color;
+                if (particle.type === 'tray') {
+                    ctx.shadowBlur = Math.max(1, this.config.shadowBlur * 0.5);
+                } else {
+                    ctx.shadowBlur = this.config.shadowBlur;
+                }
+            } else {
+                ctx.shadowBlur = 0;
+            }
+            
+            ctx.beginPath();
+            ctx.arc(
                 particle.x + particle.tx * progress,
                 particle.y + particle.ty * progress,
                 currentSize / 2,
                 0,
                 Math.PI * 2
             );
-            this.ctx.fill();
-            this.ctx.restore();
-        });
+            ctx.fill();
+        }
+
+        ctx.shadowBlur = 0;
         
         // Рисуем частицы приземления
-        this.landingParticles.forEach(particle => {
-            const progress = 1 - (particle.life / particle.startLife);
+        for (let i = 0; i < this.landingParticles.length; i++) {
+            const particle = this.landingParticles[i];
+            const lifeRatio = particle.life / particle.startLife;
+            const progress = 1 - lifeRatio;
             const scale = 0.5 + progress * 1.5; // увеличивается от 0.5 до 2.0
             const currentSize = particle.size * scale;
             const currentOpacity = particle.opacity * (1 - progress);
             
-            this.ctx.save();
-            
             // Для частиц в трее устанавливаем пониженную прозрачность
             let effectiveOpacity = currentOpacity;
             if (particle.type === 'tray') {
                 effectiveOpacity *= 0.5; // 0.5 прозрачнее
             }
+
+            if (currentSize <= 0.35 || effectiveOpacity <= 0.01) {
+                continue;
+            }
             
-            this.ctx.globalAlpha = effectiveOpacity;
-            this.ctx.fillStyle = particle.color;
-            this.ctx.beginPath();
-            this.ctx.arc(
+            ctx.globalAlpha = effectiveOpacity;
+            ctx.fillStyle = particle.color;
+            ctx.beginPath();
+            ctx.arc(
                 particle.x + particle.tx * progress,
                 particle.y + particle.ty * progress,
                 currentSize / 2,
                 0,
                 Math.PI * 2
             );
-            this.ctx.fill();
-            this.ctx.restore();
-        });
+            ctx.fill();
+        }
+
+        ctx.globalAlpha = 1;
     }
     
-    animate() {
-        this.update();
+    animate(timestamp) {
+        const deltaSeconds = this.lastFrameTime
+            ? Math.min(0.05, (timestamp - this.lastFrameTime) / 1000)
+            : 1 / 60;
+
+        this.lastFrameTime = timestamp;
+        this.update(deltaSeconds);
         this.render();
-        requestAnimationFrame(() => this.animate());
+
+        if (!this.hasActiveParticles()) {
+            this.animationFrameId = 0;
+            this.lastFrameTime = 0;
+            this.setCanvasVisibility(false);
+            return;
+        }
+
+        this.animationFrameId = requestAnimationFrame(nextTimestamp => this.animate(nextTimestamp));
     }
 }
 
@@ -741,6 +851,10 @@ let hasBoundYandexLifecycle = false;
 let yandexLifecycleInitPromise = null;
 let hasUsedSecondChance = false;
 let pendingRewardShapes = null;
+const SCORE_ANIMATION_DURATION_MS = isLowPerfParticleMode ? 520 : 1000;
+const SCORE_POPUP_LIFETIME_MS = isLowPerfParticleMode ? 650 : 1000;
+const PRAISE_POPUP_LIFETIME_MS = isLowPerfParticleMode ? 800 : 1200;
+const GAME_OVER_REVEAL_DELAY_MS = isLowPerfParticleMode ? 600 : 850;
 
 const gameContainer = document.querySelector('.game-container');
 const boardEl = document.getElementById('board');
@@ -781,6 +895,8 @@ const characterStateLayers = (() => {
 })();
 let characterStateRevertTimeoutId = null;
 let currentCharacterState = 'base';
+let pendingShakeAnimationFrameId = 0;
+let pendingComboAnimationFrameId = 0;
 const CHARACTER_STATE_HOLD_MS = 500;
 
 function setCharacterState(state) {
@@ -811,6 +927,37 @@ function setCharacterState(state) {
     }
 }
 
+function hideComboDisplay() {
+    if (!comboDisplay) return;
+
+    if (pendingComboAnimationFrameId !== 0) {
+        cancelAnimationFrame(pendingComboAnimationFrameId);
+        pendingComboAnimationFrameId = 0;
+    }
+
+    comboDisplay.classList.remove('combo-visible', 'combo-pop');
+    comboDisplay.classList.add('fade-out');
+}
+
+function showComboDisplay(text) {
+    if (!comboDisplay) return;
+
+    comboDisplay.textContent = text;
+    comboDisplay.classList.remove('fade-out', 'combo-pop');
+    comboDisplay.classList.add('combo-visible');
+
+    if (pendingComboAnimationFrameId !== 0) {
+        cancelAnimationFrame(pendingComboAnimationFrameId);
+    }
+
+    pendingComboAnimationFrameId = requestAnimationFrame(() => {
+        pendingComboAnimationFrameId = requestAnimationFrame(() => {
+            comboDisplay.classList.add('combo-pop');
+            pendingComboAnimationFrameId = 0;
+        });
+    });
+}
+
 const splashPlayBtn = document.getElementById('splash-play-btn');
 const splashOverlay = document.getElementById('splash-overlay');
 const splashLogoEl = document.getElementById('splash-logo');
@@ -825,6 +972,10 @@ const musicToggleStatusEl = document.getElementById('music-toggle-status');
 const ogTitleMeta = document.querySelector('meta[property="og:title"]');
 const ogDescriptionMeta = document.querySelector('meta[property="og:description"]');
 const localizedLogoEls = [splashLogoEl, headerLogoEl];
+
+if (document.body) {
+    document.body.classList.toggle('low-perf-effects', isLowPerfParticleMode);
+}
 
 audioManager.setSoundEnabled(isSoundEnabled);
 
@@ -1229,9 +1380,20 @@ function isThreeByThreeSquare(shape) {
 }
 
 function triggerCameraShake() {
+    if (!gameContainer) return;
+
     gameContainer.classList.remove('shake');
-    void gameContainer.offsetWidth;
-    gameContainer.classList.add('shake');
+
+    if (pendingShakeAnimationFrameId !== 0) {
+        cancelAnimationFrame(pendingShakeAnimationFrameId);
+    }
+
+    pendingShakeAnimationFrameId = requestAnimationFrame(() => {
+        pendingShakeAnimationFrameId = requestAnimationFrame(() => {
+            gameContainer.classList.add('shake');
+            pendingShakeAnimationFrameId = 0;
+        });
+    });
 }
 
 function finalizeBestScore() {
@@ -1321,7 +1483,7 @@ function showSecondChance() {
         await waitForGameplayResume();
         revealSecondChanceScreen();
         gameOverRevealTimeoutId = null;
-    }, 850);
+    }, GAME_OVER_REVEAL_DELAY_MS);
 }
 
 function showGameOver() {
@@ -1341,7 +1503,7 @@ function showGameOver() {
         await waitForGameplayResume();
         revealGameOverScreen();
         gameOverRevealTimeoutId = null;
-    }, 850);
+    }, GAME_OVER_REVEAL_DELAY_MS);
 }
 
 function getBlockClass(colorStr) {
@@ -1374,6 +1536,10 @@ function getCurrentCellSize() {
 function initGame() {
     clearPendingRefill();
     clearPendingGameOver();
+    if (pendingShakeAnimationFrameId !== 0) {
+        cancelAnimationFrame(pendingShakeAnimationFrameId);
+        pendingShakeAnimationFrameId = 0;
+    }
     if (dragElement) {
         dragElement.remove();
         dragElement = null;
@@ -1396,8 +1562,7 @@ function initGame() {
     gameOverScreen.classList.remove('show');
     secondChanceModal.classList.remove('show');
     isGameOverSequenceActive = false;
-    comboDisplay.style.animation = 'none';
-    comboDisplay.classList.add('fade-out');
+    hideComboDisplay();
     boardEl.innerHTML = '';
     renderBoard();
     fillTray();
@@ -1785,6 +1950,7 @@ function renderTray(forceEmpty = false, popIndexes = null) {
         if (piece) {
             const rows = piece.matrix.length;
             const cols = piece.matrix[0].length;
+            const longestSide = Math.max(rows, cols);
             const gap = 3;
 
             const slotW = slot.clientWidth || 100;
@@ -1800,7 +1966,8 @@ function renderTray(forceEmpty = false, popIndexes = null) {
             const maxCellH = (maxH - gap * (rows - 1)) / rows;
 
             let trayCellSize = Math.min(maxCellW, maxCellH);
-            trayCellSize = Math.min(Math.max(trayCellSize, 20), 38);
+            const minTrayCellSize = longestSide >= 5 ? 12 : longestSide >= 4 ? 16 : 20;
+            trayCellSize = Math.min(Math.max(trayCellSize, minTrayCellSize), 38);
 
             const container = document.createElement('div');
             const shouldPop = popIndexes instanceof Set ? popIndexes.has(i) : false;
@@ -2264,14 +2431,9 @@ async function checkLines(blocksPlaced) {
 
             const cellsToClear = new Set();
             if (comboStreak >= 2) {
-                comboDisplay.textContent = `${getMessages().comboLabel} x${comboStreak}`;
-                comboDisplay.classList.remove('fade-out');
-                comboDisplay.style.animation = 'none';
-                void comboDisplay.offsetWidth;
-                comboDisplay.style.animation = 'popCombo 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards';
+                showComboDisplay(`${getMessages().comboLabel} x${comboStreak}`);
             } else {
-                comboDisplay.style.animation = 'none';
-                comboDisplay.classList.add('fade-out');
+                hideComboDisplay();
             }
 
             playSound('line');
@@ -2330,8 +2492,7 @@ async function checkLines(blocksPlaced) {
             await waitForGameplayResume();
             await new Promise(resolve => setTimeout(resolve, 150));
 
-            comboDisplay.style.animation = 'none';
-            comboDisplay.classList.add('fade-out');
+            hideComboDisplay();
 
             renderBoard();
         } finally {
@@ -2350,7 +2511,7 @@ function createScorePopup(x, y, text) {
     p.style.left = `${x}px`;
     p.style.top = `${y}px`;
     document.body.appendChild(p);
-    setTimeout(() => p.remove(), 1000);
+    setTimeout(() => p.remove(), SCORE_POPUP_LIFETIME_MS);
 }
 
 function createPraisePopup(text) {
@@ -2360,7 +2521,7 @@ function createPraisePopup(text) {
     p.style.left = `${window.innerWidth / 2}px`;
     p.style.top = `${window.innerHeight / 2}px`;
     document.body.appendChild(p);
-    setTimeout(() => p.remove(), 1200);
+    setTimeout(() => p.remove(), PRAISE_POPUP_LIFETIME_MS);
 }
 
 function createParticles(x, y, colorStr, particleSize = 14, count = 7, particleType = 'explosion') {
@@ -2376,11 +2537,17 @@ function createLandingParticles(x, y, colorStr, particleType = 'landing') {
 function updateScore() {
     scoreEl.textContent = formatNumber(score);
 
-    const duration = 1000;
+    const duration = SCORE_ANIMATION_DURATION_MS;
     const startVal = displayedScore;
     const endVal = score;
     const startTime = performance.now();
     const currentAnimationToken = ++scoreAnimationToken;
+
+    if (startVal === endVal) {
+        displayedScore = endVal;
+        mainScoreEl.textContent = formatNumber(displayedScore);
+        return;
+    }
 
     function animate(now) {
         if (currentAnimationToken !== scoreAnimationToken) {
@@ -2390,8 +2557,12 @@ function updateScore() {
         const elapsed = now - startTime;
         const progress = Math.min(elapsed / duration, 1);
         const ease = progress * (2 - progress);
-        displayedScore = Math.floor(startVal + (endVal - startVal) * ease);
-        mainScoreEl.textContent = formatNumber(displayedScore);
+        const nextDisplayedScore = Math.floor(startVal + (endVal - startVal) * ease);
+
+        if (nextDisplayedScore !== displayedScore) {
+            displayedScore = nextDisplayedScore;
+            mainScoreEl.textContent = formatNumber(displayedScore);
+        }
 
         if (progress < 1) {
             requestAnimationFrame(animate);
