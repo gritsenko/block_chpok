@@ -1091,7 +1091,7 @@ body.low-perf-effects .praise-popup {
         max-width: min(430px, calc(100svh * 0.75 - 110px));
     }
     .header {
-        min-height: 118px;
+        min-height: 138px;
         margin-bottom: 8px;
         padding-top: 10px;
     }
@@ -1113,7 +1113,7 @@ body.low-perf-effects .praise-popup {
     .crystal-panel {
         display: none;
     }
-    
+
     .crystal-panel-text > span:last-child,
     .score-panel-body {
         font-size: 16px;
