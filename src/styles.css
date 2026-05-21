@@ -1110,6 +1110,10 @@ body.low-perf-effects .praise-popup {
         font-size: 10px;
         padding: 2px 8px 3px;
     }
+    .crystal-panel {
+        display: none;
+    }
+    
     .crystal-panel-text > span:last-child,
     .score-panel-body {
         font-size: 16px;
