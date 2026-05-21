@@ -89,10 +89,11 @@ body {
     overflow: hidden;
     box-shadow: 0 0 40px rgba(74, 39, 19, 0.35);
     border-radius: 35px;
-    background:
+    /* background:
         linear-gradient(180deg, rgba(255, 248, 239, 0.18) 0%, rgba(255, 244, 232, 0.08) 100%),
         linear-gradient(180deg, rgba(159, 105, 67, 0.14) 0%, rgba(94, 55, 37, 0.22) 100%);
-    background-color: rgba(249, 232, 208, 0.68);
+    background-color: rgba(249, 232, 208, 0.68); */
+    background: url('./assets/theme/background-room.jpg') center / auto 100% no-repeat;
 }
 
 .game-container.shake {
@@ -123,7 +124,7 @@ body.low-perf-effects {
     margin-bottom: 14px;
     padding-top: 26px;
     padding-bottom: 4px;
-    min-height: 168px;
+    min-height: 200px;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -413,8 +414,6 @@ body.low-perf-effects .stat-panel {
 
 .splash-overlay:not(.hidden) ~ .game-container .board-container::after {
     opacity: 1;
-    backdrop-filter: blur(10px) saturate(0.85) brightness(1.08);
-    -webkit-backdrop-filter: blur(10px) saturate(0.85) brightness(1.08);
 }
 
 .cell {
