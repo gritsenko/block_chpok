@@ -1,7 +1,7 @@
 // Блокируем выделение текста, контекстное меню и drag-and-drop изображений
 // (требования платформы 1.6.1.8 / 1.6.2.7).
 (function suppressNativeInteractionGestures() {
-    const stop = function(event) {
+    const stop = function (event) {
         event.preventDefault();
     };
     window.addEventListener('contextmenu', stop, { passive: false });
@@ -52,7 +52,7 @@ class AudioManager {
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
                 }
-                cache.put(assetUrl, response.clone()).catch(() => {});
+                cache.put(assetUrl, response.clone()).catch(() => { });
             }
 
             return response.arrayBuffer();
@@ -105,7 +105,7 @@ class AudioManager {
             console.warn('Audio context startup failed:', e);
         }
 
-        this.init().catch(() => {});
+        this.init().catch(() => { });
     }
 
     async suspend() {
@@ -127,7 +127,7 @@ class AudioManager {
 
         try {
             await this.ensureAudioContext();
-            this.init().catch(() => {});
+            this.init().catch(() => { });
         } catch (e) {
             console.warn('Failed to resume audio context:', e);
         }
@@ -137,12 +137,12 @@ class AudioManager {
         this.soundsEnabled = enabled;
 
         if (!enabled) {
-            this.suspend().catch(() => {});
+            this.suspend().catch(() => { });
             return;
         }
 
         if (this.hasStartedSession) {
-            this.resume().catch(() => {});
+            this.resume().catch(() => { });
         }
     }
 
@@ -152,7 +152,7 @@ class AudioManager {
         }
 
         if (!this.isInitialized) {
-            this.init().catch(() => {});
+            this.init().catch(() => { });
             return;
         }
 
@@ -160,7 +160,7 @@ class AudioManager {
 
         try {
             if (this.audioContext && this.audioContext.state === 'suspended') {
-                this.audioContext.resume().catch(() => {});
+                this.audioContext.resume().catch(() => { });
             }
 
             const buffer = this.buffers[soundName];
@@ -335,30 +335,30 @@ class ParticleSystem {
             maxParticles: isLowPerfParticleMode ? 56 : (isCoarsePointerDevice ? 84 : 144),
             maxLandingParticles: isLowPerfParticleMode ? 12 : (isCoarsePointerDevice ? 18 : 30)
         };
-        
+
         if (this.canvas && this.gameContainer) {
             this.ctx = this.canvas.getContext('2d', {
                 alpha: true
             });
             this.resizeCanvas();
             this.setCanvasVisibility(false);
-            
+
             window.addEventListener('resize', () => this.resizeCanvas());
         }
     }
-    
+
     resizeCanvas() {
         if (!this.canvas || !this.gameContainer) return;
-        
+
         // Размеры подстраиваются под весь игровой контейнер
         const containerRect = this.gameContainer.getBoundingClientRect();
         const width = Math.max(1, Math.round(containerRect.width));
         const height = Math.max(1, Math.round(containerRect.height));
-        
+
         // Устанавливаем размеры canvas
         this.canvas.width = width;
         this.canvas.height = height;
-        
+
         // Позиционируем canvas внутри game-container
         this.canvas.style.position = 'absolute';
         this.canvas.style.top = '0';
@@ -418,13 +418,13 @@ class ParticleSystem {
         this.lastFrameTime = 0;
         this.animationFrameId = requestAnimationFrame(timestamp => this.animate(timestamp));
     }
-    
+
     createParticles(x, y, colorStr, particleSize = 14, count = 7, particleType = 'explosion') {
         if (!this.ctx) return;
 
         const origin = this.getRelativeCanvasPoint(x, y);
         if (!origin) return;
-        
+
         let color;
         if (particleType === 'tray') {
             // Для частиц в трее используем белый цвет
@@ -433,30 +433,30 @@ class ParticleSystem {
             const pal = BLOCK_PALETTES[colorStr] || BLOCK_PALETTES[COLORS.purple];
             color = pal.base;
         }
-        
+
         // Адаптируем количество частиц под мобильные устройства
         const particleCount = Math.max(1, Math.round(count * this.config.particleCountScale));
-        
+
         for (let i = 0; i < particleCount; i++) {
             const angle = Math.random() * Math.PI * 2;
             const distance = Math.random() * 60 + 30;
             const tx = Math.cos(angle) * distance;
             const ty = Math.sin(angle) * distance;
             const rot = Math.random() * 360;
-            
+
             // Настройки для частиц в трее
             let adjustedSize = particleSize;
             let adjustedLife = 0.5;
             let adjustedTx = tx;
             let adjustedTy = ty;
-            
+
             if (particleType === 'tray') {
                 adjustedSize *= 0.7;  // 0.7x меньше
                 adjustedLife *= 0.5;  // 0.5x жизни (быстрее исчезают)
                 adjustedTx *= 2;      // 2x быстрее по X
                 adjustedTy *= 2;      // 2x быстрее по Y
             }
-            
+
             this.particles.push({
                 x: origin.x,
                 y: origin.y,
@@ -474,13 +474,13 @@ class ParticleSystem {
         this.trimParticleBuffer(this.particles, this.config.maxParticles);
         this.ensureAnimation();
     }
-    
+
     createLandingParticles(x, y, colorStr, particleType = 'landing') {
         if (!this.ctx) return;
 
         const origin = this.getRelativeCanvasPoint(x, y);
         if (!origin) return;
-        
+
         let color;
         if (particleType === 'tray') {
             // Для частиц в трее используем белый цвет
@@ -489,21 +489,21 @@ class ParticleSystem {
             const pal = BLOCK_PALETTES[colorStr] || BLOCK_PALETTES[COLORS.purple];
             color = pal.base;
         }
-        
+
         // Уменьшенное количество частиц приземления
         for (let i = 0; i < this.config.landingParticleCount; i++) {
             const angle = Math.random() * Math.PI * 2;
             const distance = Math.random() * 40 + 10;
             const tx = Math.cos(angle) * distance;
             const ty = Math.sin(angle) * distance;
-            
+
             // Настройки для частиц в трее
             let adjustedSize = 12;
             let adjustedOpacity = 0.6;
             let adjustedLife = 0.6;
             let adjustedTx = tx;
             let adjustedTy = ty;
-            
+
             if (particleType === 'tray') {
                 adjustedSize *= 0.7;  // 0.7x меньше
                 adjustedOpacity *= 0.5;  // 0.5x прозрачнее
@@ -511,7 +511,7 @@ class ParticleSystem {
                 adjustedTx *= 2;      // 2x быстрее по X
                 adjustedTy *= 2;      // 2x быстрее по Y
             }
-            
+
             this.landingParticles.push({
                 x: origin.x,
                 y: origin.y,
@@ -529,7 +529,7 @@ class ParticleSystem {
         this.trimParticleBuffer(this.landingParticles, this.config.maxLandingParticles);
         this.ensureAnimation();
     }
-    
+
     updateParticles(list, deltaSeconds) {
         let writeIndex = 0;
 
@@ -550,11 +550,11 @@ class ParticleSystem {
         this.updateParticles(this.particles, deltaSeconds);
         this.updateParticles(this.landingParticles, deltaSeconds);
     }
-    
+
     render() {
         if (!this.ctx) return;
         const ctx = this.ctx;
-        
+
         // Очищаем область для перерисовки
         this.clearCanvas();
 
@@ -564,7 +564,7 @@ class ParticleSystem {
             this.setCanvasVisibility(false);
             return;
         }
-        
+
         // Рисуем обычные частицы
         for (let i = 0; i < this.particles.length; i++) {
             const particle = this.particles[i];
@@ -572,7 +572,7 @@ class ParticleSystem {
             const progress = 1 - lifeRatio;
             const currentSize = particle.size * (1 - progress);
             const currentOpacity = Math.min(1, lifeRatio);
-            
+
             // Для частиц в трее устанавливаем пониженную прозрачность
             let effectiveOpacity = currentOpacity;
             if (particle.type === 'tray') {
@@ -582,10 +582,10 @@ class ParticleSystem {
             if (currentSize <= 0.35 || effectiveOpacity <= 0.01) {
                 continue;
             }
-            
+
             ctx.globalAlpha = effectiveOpacity;
             ctx.fillStyle = particle.color;
-            
+
             // Для частиц в трее уменьшаем размытие тени
             if (this.config.shadowBlur > 0) {
                 ctx.shadowColor = particle.color;
@@ -597,7 +597,7 @@ class ParticleSystem {
             } else {
                 ctx.shadowBlur = 0;
             }
-            
+
             ctx.beginPath();
             ctx.arc(
                 particle.x + particle.tx * progress,
@@ -610,7 +610,7 @@ class ParticleSystem {
         }
 
         ctx.shadowBlur = 0;
-        
+
         // Рисуем частицы приземления
         for (let i = 0; i < this.landingParticles.length; i++) {
             const particle = this.landingParticles[i];
@@ -619,7 +619,7 @@ class ParticleSystem {
             const scale = 0.5 + progress * 1.5; // увеличивается от 0.5 до 2.0
             const currentSize = particle.size * scale;
             const currentOpacity = particle.opacity * (1 - progress);
-            
+
             // Для частиц в трее устанавливаем пониженную прозрачность
             let effectiveOpacity = currentOpacity;
             if (particle.type === 'tray') {
@@ -629,7 +629,7 @@ class ParticleSystem {
             if (currentSize <= 0.35 || effectiveOpacity <= 0.01) {
                 continue;
             }
-            
+
             ctx.globalAlpha = effectiveOpacity;
             ctx.fillStyle = particle.color;
             ctx.beginPath();
@@ -645,7 +645,7 @@ class ParticleSystem {
 
         ctx.globalAlpha = 1;
     }
-    
+
     animate(timestamp) {
         const deltaSeconds = this.lastFrameTime
             ? Math.min(0.05, (timestamp - this.lastFrameTime) / 1000)
@@ -781,28 +781,28 @@ const SHAPES_DATA = [
     { matrix: [[1, 0], [1, 1], [1, 0]], color: COLORS.green }, // T-shape sideways
     { matrix: [[0, 1], [1, 1], [0, 1]], color: COLORS.green }, // T-shape sideways mirrored
     { matrix: [[1, 1, 1], [1, 1, 1]], color: COLORS.red }, // 2x3 rectangle
-    
+
     // 2x2 figures
     { matrix: [[1, 1], [1, 1]], color: COLORS.blue }, // 2x2 square
-    
+
     // 2x3 and 3x2 rectangles
     { matrix: [[1, 1], [1, 1], [1, 1]], color: COLORS.purple },  // 3x2 rectangle
-    
+
     // Z-shaped figures (Tetris-like)
     { matrix: [[1, 1, 0], [0, 1, 1]], color: COLORS.orange }, // Z-shape
     { matrix: [[0, 1, 1], [1, 1, 0]], color: COLORS.orange }, // Z-shape mirrored
     { matrix: [[1, 0], [1, 1], [0, 1]], color: COLORS.red }, // Z-shape vertical
     { matrix: [[0, 1], [1, 1], [1, 0]], color: COLORS.red }, // Z-shape vertical mirrored
-    
+
     // L-shaped figures
     { matrix: [[1, 0], [1, 1]], color: COLORS.orange }, // L-shape small
     { matrix: [[0, 1], [1, 1]], color: COLORS.orange }, // L-shape small mirrored
     { matrix: [[1, 1], [1, 0]], color: COLORS.orange }, // L-shape small mirrored2
     { matrix: [[1, 1], [0, 1]], color: COLORS.orange }, // L-shape small mirrored3
-    
+
     // Diagonal figures
     { matrix: [[1, 0], [0, 1]], color: COLORS.yellow }, // diagonal 2 blocks
-    
+
     // 1xN and Nx1 figures
     { matrix: [[1, 1, 1, 1, 1]], color: COLORS.purple }, // 1x5
     { matrix: [[1], [1], [1], [1], [1]], color: COLORS.purple }, // 5x1
@@ -827,9 +827,11 @@ let lastPlacementCoords = null;
 let comboStreak = 0;
 const isLocalhost = typeof window !== 'undefined'
     && (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost');
+const isEmbeddedRuntime = typeof window !== 'undefined' && window.self !== window.top;
+const isLocalDebugEnabled = isLocalhost && !isEmbeddedRuntime;
 
 function readDebugLanguageOverride() {
-    if (!isLocalhost) return null;
+    if (!isLocalDebugEnabled) return null;
     try {
         const raw = window.localStorage.getItem(DEBUG_LANGUAGE_KEY);
         return (raw && Object.prototype.hasOwnProperty.call(I18N, raw)) ? raw : null;
@@ -837,6 +839,7 @@ function readDebugLanguageOverride() {
         return null;
     }
 }
+
 
 let currentLanguage = readDebugLanguageOverride()
     || ((window.YandexSDK && typeof window.YandexSDK.getLanguage === 'function')
@@ -1086,7 +1089,7 @@ function applyTranslations(language) {
     settingsCloseBtn.setAttribute('aria-label', messages.closeSettings);
     if (splashLogoEl) splashLogoEl.alt = messages.splashLogoAlt;
     if (headerLogoEl) headerLogoEl.alt = messages.headerLogoAlt;
-    
+
     if (secondChanceTitleEl) secondChanceTitleEl.textContent = messages.secondChanceTitle;
     if (secondChanceTextEl) secondChanceTextEl.textContent = messages.secondChanceText;
     if (secondChanceAdBtn) secondChanceAdBtn.textContent = messages.secondChanceAdBtn;
@@ -1215,7 +1218,7 @@ function handleYandexPause() {
         cancelDrag();
     }
 
-    audioManager.suspend().catch(() => {});
+    audioManager.suspend().catch(() => { });
     syncGameplayState();
 }
 
@@ -1223,7 +1226,7 @@ function handleYandexResume() {
     isGameplayPausedBySdk = false;
 
     if (hasGameStarted) {
-        audioManager.resume().catch(() => {});
+        audioManager.resume().catch(() => { });
     }
 
     syncGameplayState();
@@ -1321,10 +1324,10 @@ async function initializeLanguage() {
         const applied = await applyYandexLanguage();
         if (!applied) {
             setTimeout(() => {
-                applyYandexLanguage().catch(() => {});
+                applyYandexLanguage().catch(() => { });
             }, 1000);
             setTimeout(() => {
-                applyYandexLanguage().catch(() => {});
+                applyYandexLanguage().catch(() => { });
             }, 2500);
         }
     } catch (error) {
@@ -1417,7 +1420,7 @@ function revealGameOverScreen() {
 function generateRewardShapes() {
     const newShapes = [];
     newShapes.push({ matrix: [[1]], color: COLORS.yellow }); // Одиночный квадратик
-    
+
     const possibleShapes = getAllPossibleShapes();
     for (let i = 0; i < 2; i++) {
         if (possibleShapes.length > i) {
@@ -1426,7 +1429,7 @@ function generateRewardShapes() {
             newShapes.push(cloneShape(SHAPES_DATA[Math.floor(Math.random() * SHAPES_DATA.length)]));
         }
     }
-    
+
     // Перемешиваем чтобы квадратик не всегда был первым
     newShapes.sort(() => Math.random() - 0.5);
     return newShapes;
@@ -1435,11 +1438,11 @@ function generateRewardShapes() {
 function renderRewardShapes(shapes) {
     if (!secondChanceShapesEl) return;
     secondChanceShapesEl.innerHTML = '';
-    
+
     shapes.forEach(piece => {
         const slot = document.createElement('div');
         slot.className = 'reward-shape-slot';
-        
+
         const rows = piece.matrix.length;
         const cols = piece.matrix[0].length;
         const gap = 2;
@@ -1626,12 +1629,12 @@ function createShapeHTML(shape, withPop = true) {
 
 function getAllPossibleShapes() {
     const possibleShapes = [];
-    
+
     for (let s = 0; s < SHAPES_DATA.length; s++) {
         const shape = SHAPES_DATA[s];
         let canPlaceShape = false;
         let placementCount = 0; // Количество возможных мест для размещения
-        
+
         // Проверяем все возможные позиции на доске
         for (let r = 0; r <= BOARD_SIZE - shape.matrix.length; r++) {
             for (let c = 0; c <= BOARD_SIZE - shape.matrix[0].length; c++) {
@@ -1641,24 +1644,24 @@ function getAllPossibleShapes() {
                 }
             }
         }
-        
+
         if (canPlaceShape) {
             // Добавляем индекс фигуры и вычисляем её "сложность" и количество возможных мест
             const complexity = shape.matrix.length * shape.matrix[0].length;
             // Вычисляем приоритет: сложность + коэффициент от количества доступных мест
             const priority = complexity + (placementCount / 10); // Делим на 10, чтобы не перекрывать влияние сложности
-            possibleShapes.push({ 
-                index: s, 
+            possibleShapes.push({
+                index: s,
                 complexity: complexity,
                 placementCount: placementCount,
-                priority: priority 
+                priority: priority
             });
         }
     }
-    
+
     // Сортируем по приоритету: сначала более сложные фигуры с большим количеством доступных мест
     possibleShapes.sort((a, b) => b.priority - a.priority);
-    
+
     // Возвращаем только индексы фигур в порядке приоритета
     return possibleShapes.map(item => item.index);
 }
@@ -1667,7 +1670,7 @@ function getAllPossibleShapes() {
 function canPlaceAllShapesInOrder(shapeList) {
     // Создаем копию доски для симуляции
     const tempBoard = board.map(row => [...row]);
-    
+
     // Функция, которая проверяет возможность размещения фигуры на временной доске
     function canPlaceOnTempBoard(shape, startR, startC) {
         for (let r = 0; r < shape.matrix.length; r++) {
@@ -1694,12 +1697,12 @@ function canPlaceAllShapesInOrder(shapeList) {
             }
         }
     }
-    
+
     // Пробуем разместить все фигуры из списка
     for (const shapeIndex of shapeList) {
         const shape = SHAPES_DATA[shapeIndex];
         let placed = false;
-        
+
         // Ищем позицию для размещения фигуры
         for (let r = 0; r <= BOARD_SIZE - shape.matrix.length; r++) {
             for (let c = 0; c <= BOARD_SIZE - shape.matrix[0].length; c++) {
@@ -1711,13 +1714,13 @@ function canPlaceAllShapesInOrder(shapeList) {
             }
             if (placed) break;
         }
-        
+
         // Если не можем разместить хотя бы одну фигуру, возвращаем false
         if (!placed) {
             return false;
         }
     }
-    
+
     return true;
 }
 
@@ -1726,10 +1729,10 @@ function wouldCreateLineClear(shape, startR, startC) {
     if (!shape || startR < 0 || startC < 0) {
         return { rows: [], cols: [] };
     }
-    
+
     // Create a temporary board to simulate the placement
     const tempBoard = board.map(row => [...row]);
-    
+
     // Place the shape on the temporary board
     for (let r = 0; r < shape.matrix.length; r++) {
         for (let c = 0; c < shape.matrix[0].length; c++) {
@@ -1742,11 +1745,11 @@ function wouldCreateLineClear(shape, startR, startC) {
             }
         }
     }
-    
+
     // Check which rows and columns would be filled completely
     const rowsToClear = [];
     const colsToClear = [];
-    
+
     // Check rows
     for (let r = 0; r < BOARD_SIZE; r++) {
         let isRowFull = true;
@@ -1760,7 +1763,7 @@ function wouldCreateLineClear(shape, startR, startC) {
             rowsToClear.push(r);
         }
     }
-    
+
     // Check columns
     for (let c = 0; c < BOARD_SIZE; c++) {
         let isColFull = true;
@@ -1774,7 +1777,7 @@ function wouldCreateLineClear(shape, startR, startC) {
             colsToClear.push(c);
         }
     }
-    
+
     return { rows: rowsToClear, cols: colsToClear };
 }
 
@@ -1791,29 +1794,29 @@ function fillTray() {
 
             // Получаем все фигуры, которые можно разместить на текущей доске, в порядке убывания сложности
             const possibleShapeIndices = getAllPossibleShapes();
-            
+
             // Если нет доступных фигур, игра закончится в checkGameOver
             // Но если они есть, выбираем 3 такие фигуры, чтобы все они могли быть размещены
             let selectedShapes = [];
-            
+
             if (possibleShapeIndices.length > 0) {
                 // Попробуем найти комбинацию из 3 фигур, которую можно разместить
                 let foundValidCombination = false;
-                
+
                 // Попробуем найти комбинацию без дубликатов
                 const maxAttempts = 100;
                 let attempts = 0;
-                
+
                 while (!foundValidCombination && attempts < maxAttempts && possibleShapeIndices.length >= 3) {
                     attempts++;
-                    
+
                     // Создаем копию массива возможных фигур и перемешиваем
                     const shuffledIndices = [...possibleShapeIndices].sort(() => Math.random() - 0.5);
-                    
+
                     // Берем первые 3 разных фигуры из перемешанного массива
                     const tempSelected = [];
                     const usedIndices = new Set();
-                    
+
                     for (const idx of shuffledIndices) {
                         if (tempSelected.length >= 3) break;
                         if (!usedIndices.has(idx)) {
@@ -1821,30 +1824,30 @@ function fillTray() {
                             usedIndices.add(idx);
                         }
                     }
-                    
+
                     // Проверяем, можно ли разместить все 3 выбранные фигуры
                     if (tempSelected.length === 3 && canPlaceAllShapesInOrder(tempSelected)) {
                         selectedShapes = tempSelected.map(idx => cloneShape(SHAPES_DATA[idx]));
                         foundValidCombination = true;
                     }
                 }
-                
+
                 // Если не нашлась комбинация из 3 разных фигур, пробуем с меньшим приоритетом уникальности
                 if (!foundValidCombination && possibleShapeIndices.length > 0) {
                     // Берем 3 фигуры, максимально избегая дубликатов
                     const tempSelected = [];
                     const usedIndices = new Set();
-                    
+
                     for (let i = 0; i < 3; i++) {
                         let selectedIndex;
-                        
+
                         if (i === 0) {
                             // Для первой фигуры берем самую сложную (если возможно)
                             selectedIndex = possibleShapeIndices[0];
                         } else {
                             // Для последующих стараемся избегать дубликатов
                             let candidateIndex = -1;
-                            
+
                             // Сначала пытаемся найти фигуру, которой нет в текущем списке
                             for (let j = 0; j < possibleShapeIndices.length; j++) {
                                 const idx = possibleShapeIndices[j];
@@ -1853,7 +1856,7 @@ function fillTray() {
                                     break;
                                 }
                             }
-                            
+
                             // Если все фигуры уже используются, берем любую
                             if (candidateIndex === -1) {
                                 selectedIndex = possibleShapeIndices[0]; // или первую доступную
@@ -1861,11 +1864,11 @@ function fillTray() {
                                 selectedIndex = candidateIndex;
                             }
                         }
-                        
+
                         tempSelected.push(selectedIndex);
                         usedIndices.add(selectedIndex);
                     }
-                    
+
                     // Проверяем, можно ли разместить эти фигуры
                     if (canPlaceAllShapesInOrder(tempSelected)) {
                         selectedShapes = tempSelected.map(idx => cloneShape(SHAPES_DATA[idx]));
@@ -1873,10 +1876,10 @@ function fillTray() {
                         // Если нельзя разместить, берем три разные фигуры без проверки размещения
                         const differentShapes = [];
                         const usedShapes = new Set();
-                        
+
                         for (const idx of possibleShapeIndices) {
                             if (differentShapes.length >= 3) break;
-                            
+
                             // Проверяем, является ли фигура уникальной (на основе матрицы)
                             const shapeMatrixKey = JSON.stringify(SHAPES_DATA[idx].matrix);
                             if (!usedShapes.has(shapeMatrixKey)) {
@@ -1884,7 +1887,7 @@ function fillTray() {
                                 usedShapes.add(shapeMatrixKey);
                             }
                         }
-                        
+
                         // Если уникальных не хватает, добавляем оставшиеся
                         if (differentShapes.length < 3) {
                             for (const idx of possibleShapeIndices) {
@@ -1892,23 +1895,23 @@ function fillTray() {
                                 differentShapes.push(idx);
                             }
                         }
-                        
+
                         selectedShapes = differentShapes.slice(0, 3).map(idx => cloneShape(SHAPES_DATA[idx]));
                     }
                 }
-                
+
                 // Если и это не помогло, просто берём первые 3 возможные фигуры
                 if (selectedShapes.length === 0 && possibleShapeIndices.length > 0) {
                     const limitedIndices = possibleShapeIndices.slice(0, 3);
                     selectedShapes = limitedIndices.map(idx => cloneShape(SHAPES_DATA[idx]));
                 }
             }
-            
+
             // Заполняем трей фигурами
             for (let i = 0; i < 3; i++) {
                 // Если смогли подобрать подходящие фигуры, используем их, иначе берем случайную
                 const randomShape = selectedShapes[i] || cloneShape(SHAPES_DATA[Math.floor(Math.random() * SHAPES_DATA.length)]);
-                
+
                 const slotFillTimeoutId = setTimeout(async () => {
                     await waitForGameplayResume();
 
@@ -2107,7 +2110,7 @@ function clearPreview() {
         el.classList.remove('preview');
         el.style.backgroundColor = ''; // Reset custom background
     });
-    
+
     // Also clear any line highlights
     document.querySelectorAll('.cell.line-highlight').forEach(el => {
         el.classList.remove('line-highlight');
@@ -2126,19 +2129,19 @@ function hexToRgba(hex, alpha) {
 function drawPreview(shape, startR, startC) {
     // First clear all previous previews
     clearPreview();
-    
+
     // Validate inputs
     if (!shape || startR < 0 || startC < 0) {
         return;
     }
-    
+
     // Convert CSS variable to actual color value
     const computedStyle = getComputedStyle(document.documentElement);
     let shapeColor = shape.color;
     if (shape.color && shape.color.includes('var(')) {
         const varName = shape.color.replace('var(', '').replace(')', '').trim();
         shapeColor = computedStyle.getPropertyValue(varName).trim();
-        
+
         // If the resolved color is empty, use a default
         if (!shapeColor) {
             shapeColor = '#888888'; // default gray
@@ -2146,7 +2149,7 @@ function drawPreview(shape, startR, startC) {
     } else if (!shape.color) {
         shapeColor = '#888888'; // default gray
     }
-    
+
     // Add preview styling to the shape cells
     for (let r = 0; r < shape.matrix.length; r++) {
         for (let c = 0; c < shape.matrix[0].length; c++) {
@@ -2154,7 +2157,7 @@ function drawPreview(shape, startR, startC) {
                 const cell = document.getElementById(`cell-${startR + r}-${startC + c}`);
                 if (cell) {
                     cell.classList.add('preview');
-                    
+
                     // Apply the shape's color with reduced opacity (semi-transparent)
                     // ~0.5 opacity for preview
                     cell.style.backgroundColor = hexToRgba(shapeColor, 0.5);
@@ -2162,7 +2165,7 @@ function drawPreview(shape, startR, startC) {
             }
         }
     }
-    
+
     // Check if placing this shape would cause any line clears
     try {
         const wouldCauseLineClear = wouldCreateLineClear(shape, startR, startC);
@@ -2180,7 +2183,7 @@ function drawPreview(shape, startR, startC) {
                     }
                 }
             }
-            
+
             for (const col of wouldCauseLineClear.cols) {
                 for (let r = 0; r < BOARD_SIZE; r++) {
                     const cell = document.getElementById(`cell-${r}-${col}`);
@@ -2596,7 +2599,7 @@ function checkGameOver() {
 
     gameOverTimeoutId = setTimeout(async () => {
         await waitForGameplayResume();
-        
+
         if (!hasUsedSecondChance && window.YandexSDK && window.YandexSDK.isAvailable()) {
             pendingRewardShapes = generateRewardShapes();
             renderRewardShapes(pendingRewardShapes);
@@ -2604,7 +2607,7 @@ function checkGameOver() {
         } else {
             showGameOver();
         }
-        
+
         gameOverTimeoutId = null;
     }, 500);
 }
@@ -2620,12 +2623,12 @@ async function syncBestScoreWithYandex() {
         try {
             const currentLocal = bestScore || 0;
             const yaScore = await window.YandexSDK.getBestScore();
-            
+
             if (typeof yaScore === 'number' && yaScore > currentLocal) {
                 bestScore = yaScore;
                 try {
                     window.localStorage.setItem(BEST_SCORE_KEY, String(bestScore));
-                } catch (e) {}
+                } catch (e) { }
                 updateBestScoreDisplay();
             } else if (currentLocal > (yaScore || 0)) {
                 window.YandexSDK.saveBestScore(currentLocal);
@@ -2649,7 +2652,7 @@ function startGame() {
     splashOverlay.classList.add('hidden');
     closeSettingsModal();
     hasGameStarted = true;
-    audioManager.beginGameSession().catch(() => {});
+    audioManager.beginGameSession().catch(() => { });
     haptic.confirm();
     initGame();
     syncGameplayState();
@@ -2668,7 +2671,7 @@ function startGame() {
                 }
             }, 1000);
         }
-        
+
         // Синхронизируем рекорды с небольшой задержкой, чтобы SDK точно успело загрузить данные
         setTimeout(syncBestScoreWithYandex, 500);
         // Запросим еще раз чуть позже на случай долгой инициализации SDK
@@ -2696,7 +2699,7 @@ if (secondChanceAdBtn) {
 
         window.YandexSDK.showRewardedVideo({
             onOpen: () => {
-                audioManager.suspend().catch(() => {});
+                audioManager.suspend().catch(() => { });
                 syncGameplayState();
             },
             onRewarded: () => {
@@ -2704,9 +2707,9 @@ if (secondChanceAdBtn) {
             },
             onClose: () => {
                 if (!isGameplayPausedBySdk) {
-                    audioManager.resume().catch(() => {});
+                    audioManager.resume().catch(() => { });
                 }
-                
+
                 // Если награда не получена, показываем game over
                 if (!hasUsedSecondChance) {
                     pendingRewardShapes = null;
@@ -2720,7 +2723,7 @@ if (secondChanceAdBtn) {
             },
             onError: () => {
                 if (!isGameplayPausedBySdk) {
-                    audioManager.resume().catch(() => {});
+                    audioManager.resume().catch(() => { });
                 }
                 pendingRewardShapes = null;
                 secondChanceModal.classList.remove('show');
@@ -2747,14 +2750,14 @@ function applySecondChanceReward() {
     secondChanceModal.classList.remove('show');
     isGameOverSequenceActive = false;
     gameContainer.classList.remove('game-over-transition');
-    
+
     if (pendingRewardShapes) {
         for (let i = 0; i < 3; i++) {
             trayPieces[i] = pendingRewardShapes[i];
         }
     }
     pendingRewardShapes = null;
-    
+
     renderTray();
     syncGameplayState();
 }
@@ -2776,7 +2779,7 @@ window.addEventListener('load', refreshLayoutMetrics);
 requestAnimationFrame(refreshLayoutMetrics);
 
 const debugGameOverBtn = document.getElementById('debug-gameover-btn');
-if (debugGameOverBtn && isLocalhost) {
+if (debugGameOverBtn && isLocalDebugEnabled) {
     debugGameOverBtn.style.display = 'block';
     debugGameOverBtn.addEventListener('click', () => {
         if (!hasUsedSecondChance) {
@@ -2790,7 +2793,7 @@ if (debugGameOverBtn && isLocalhost) {
 }
 
 const debugLangBtn = document.getElementById('debug-lang-btn');
-if (debugLangBtn && isLocalhost) {
+if (debugLangBtn && isLocalDebugEnabled) {
     const SUPPORTED_LANGUAGES = Object.keys(I18N);
     const updateDebugLangLabel = () => {
         debugLangBtn.textContent = `Lang: ${currentLanguage.toUpperCase()}`;
