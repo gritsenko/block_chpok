@@ -1242,3 +1242,173 @@ body.low-perf-effects .praise-popup {
         gap: 3px;
     }
 }
+
+@media (orientation: landscape) and (max-height: 620px) {
+    :root {
+        --landscape-body-pad: clamp(8px, 1.25vw, 14px);
+        --landscape-container-pad-y: clamp(10px, 1.8vh, 18px);
+        --landscape-container-pad-x: clamp(12px, 1.5vw, 20px);
+        --landscape-column-gap: clamp(12px, 1.8vw, 24px);
+        --landscape-board-pad: clamp(10px, 1.8vh, 14px);
+        --landscape-left-rail: clamp(150px, 16vw, 190px);
+        --landscape-right-rail: clamp(92px, 11vw, 124px);
+    }
+
+    body {
+        height: 100svh;
+        padding: var(--landscape-body-pad);
+        align-items: center;
+        justify-content: center;
+    }
+
+    .game-container {
+        width: min(100%, 1400px);
+        max-width: none;
+        height: calc(100svh - (var(--landscape-body-pad) * 2));
+        max-height: none;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: var(--landscape-left-rail) minmax(0, 1fr) var(--landscape-right-rail);
+        grid-template-rows: 1fr;
+        align-items: stretch;
+        column-gap: var(--landscape-column-gap);
+        padding: var(--landscape-container-pad-y) var(--landscape-container-pad-x);
+        background-size: cover;
+        border-radius: 28px;
+    }
+
+    .header {
+        grid-column: 1;
+        grid-row: 1;
+        position: static;
+        min-height: 0;
+        height: 100%;
+        margin-bottom: 0;
+        padding: clamp(38px, 9vh, 68px) 0 0;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        gap: clamp(12px, 2vh, 18px);
+    }
+
+    .header-banner {
+        position: relative;
+        top: auto;
+        left: auto;
+        width: min(148%, 300px);
+        aspect-ratio: 886 / 296;
+        margin-left: clamp(-38px, -3vw, -14px);
+        display: block;
+        pointer-events: none;
+    }
+
+    .header-branch-banner,
+    .header-branch-banner-state {
+        width: 100%;
+        max-width: none;
+    }
+
+    .header-branch-banner-state {
+        left: 0;
+        top: 0;
+        transform: none;
+    }
+
+    .settings-btn {
+        top: clamp(6px, 1.2vh, 12px);
+        right: clamp(6px, 1vw, 12px);
+        width: clamp(46px, 5.5vw, 62px);
+        height: clamp(46px, 5.5vw, 62px);
+    }
+
+    .header-stats {
+        margin-top: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        gap: clamp(12px, 2vh, 18px);
+    }
+
+    .stat-panel,
+    .score-panel,
+    .crystal-panel {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .crystal-panel {
+        display: flex;
+    }
+
+    .stat-panel {
+        padding-top: 12px;
+    }
+
+    .stat-panel-ribbon {
+        left: 10px;
+        font-size: clamp(9px, 1.4vh, 11px);
+    }
+
+    .stat-panel-body {
+        width: 100%;
+        min-height: 0;
+        justify-content: center;
+        padding: clamp(7px, 1.5vh, 10px) clamp(10px, 1.2vw, 14px);
+        font-size: clamp(16px, 2.4vh, 20px);
+    }
+
+    .score-panel-body,
+    .crystal-panel-text > span:last-child {
+        font-size: clamp(18px, 2.7vh, 22px);
+    }
+
+    .crystal-panel-body {
+        padding: clamp(7px, 1.4vh, 10px) clamp(10px, 1vw, 12px);
+    }
+
+    .crystal-panel-text > #crystals-label {
+        font-size: clamp(9px, 1.3vh, 11px);
+    }
+
+    .board-container {
+        grid-column: 2;
+        grid-row: 1;
+        align-self: center;
+        justify-self: center;
+        margin-bottom: 0;
+        padding: var(--landscape-board-pad);
+        width: min(
+            100%,
+            calc(
+                100svh
+                - (var(--landscape-body-pad) * 2)
+                - (var(--landscape-container-pad-y) * 2)
+                - (var(--landscape-board-pad) * 2)
+            )
+        );
+    }
+
+    .board-container::after {
+        inset: var(--landscape-board-pad);
+    }
+
+    .tray {
+        grid-column: 3;
+        grid-row: 1;
+        height: 100%;
+        margin-bottom: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: center;
+        gap: clamp(12px, 2vh, 18px);
+    }
+
+    .tray-slot {
+        flex: 0 0 auto;
+        width: 100%;
+    }
+}
