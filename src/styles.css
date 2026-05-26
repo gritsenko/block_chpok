@@ -221,7 +221,8 @@ body.low-perf-effects .stat-panel {
     transition: transform 0.12s ease, filter 0.12s ease;
     position: absolute;
     top: 8px;
-    right: 8px;
+    left: 8px;
+    right: auto;
     filter: drop-shadow(0 3px 4px rgba(60, 26, 8, 0.45));
 }
 
@@ -1132,6 +1133,13 @@ body.low-perf-effects .praise-popup {
     }
 }
 
+@media (orientation: landscape) {
+    .settings-btn {
+        left: 8px;
+        right: auto;
+    }
+}
+
 .splash-overlay {
     position: fixed;
     top: 0;
@@ -1317,7 +1325,8 @@ body.low-perf-effects .praise-popup {
 
     .settings-btn {
         top: clamp(6px, 1.2vh, 12px);
-        right: clamp(6px, 1vw, 12px);
+        left: clamp(6px, 1vw, 12px);
+        right: auto;
         width: clamp(46px, 5.5vw, 62px);
         height: clamp(46px, 5.5vw, 62px);
     }
