@@ -12,9 +12,9 @@
     <meta property="og:url" content="https://gritsenko.biz/block_chpok/">
     <meta name="twitter:card" content="summary_large_image">
 
-    <!-- Yandex Games SDK -->
-    <script src="/sdk.js"></script>
-    <script src="yandex-sdk.js"></script>
+    <!-- Platform facade: detects the native ads bridge and lazily loads the
+         Yandex Games SDK only when no native bridge is present. -->
+    <script src="platform.js"></script>
 
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css">

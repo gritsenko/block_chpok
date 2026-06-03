@@ -854,6 +854,19 @@ let hasBoundYandexLifecycle = false;
 let yandexLifecycleInitPromise = null;
 let hasUsedSecondChance = false;
 let pendingRewardShapes = null;
+
+// --- INTERSTITIAL (показ полноэкранной рекламы при рестарте) ---
+// Реклама привязана к началу новой сессии, а не к отказу: экран Game Over служит
+// психологическим буфером, и только при нажатии «Заново» решается вопрос о показе.
+const INTERSTITIAL_EVERY_N_GAMES = 3;                 // показываем не чаще, чем каждый 3-й рестарт
+const INTERSTITIAL_MIN_SESSION_MS = 30 * 1000;        // только после достаточно долгой партии
+const INTERSTITIAL_MIN_INTERVAL_MS = 2 * 60 * 1000;   // и если рекламы не было пару минут
+const INTERSTITIAL_FALLBACK_MS = 8000;                // страховка, если провайдер «молчит»
+let gamesSinceInterstitial = 0;
+let skipNextInterstitial = false;                     // выставляется после возрождения за rewarded
+let lastInterstitialAtMs = 0;
+let sessionStartedAtMs = 0;
+let isInterstitialInFlight = false;
 const SCORE_ANIMATION_DURATION_MS = isLowPerfParticleMode ? 520 : 1000;
 const SCORE_POPUP_LIFETIME_MS = isLowPerfParticleMode ? 650 : 1000;
 const PRAISE_POPUP_LIFETIME_MS = isLowPerfParticleMode ? 800 : 1200;
@@ -1242,12 +1255,17 @@ async function initializeYandexLifecycle() {
         return yandexLifecycleInitPromise;
     }
 
-    if (!window.YandexSDK || typeof window.YandexSDK.init !== 'function') {
-        return;
-    }
-
     yandexLifecycleInitPromise = (async () => {
         try {
+            // Yandex SDK is loaded on demand by platform.js — wait for it first.
+            if (window.GameAds && typeof window.GameAds.whenYandexReady === 'function') {
+                await window.GameAds.whenYandexReady();
+            }
+
+            if (!window.YandexSDK || typeof window.YandexSDK.init !== 'function') {
+                return;
+            }
+
             await window.YandexSDK.init();
             hasBoundYandexLifecycle = true;
 
@@ -1301,11 +1319,14 @@ async function initializeLanguage() {
         return;
     }
 
-    let initialLang = typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE;
-    if (window.YandexSDK && typeof window.YandexSDK.getLanguage === 'function') {
-        initialLang = window.YandexSDK.getLanguage();
-    }
+    const initialLang = typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE;
     applyTranslations(initialLang);
+
+    // The Yandex SDK is now loaded lazily by platform.js — wait for that to settle
+    // before reading the platform language.
+    if (window.GameAds && typeof window.GameAds.whenYandexReady === 'function') {
+        await window.GameAds.whenYandexReady();
+    }
 
     if (!window.YandexSDK || typeof window.YandexSDK.init !== 'function') {
         return;
@@ -1561,6 +1582,7 @@ function initGame() {
     dragPointerType = 'mouse';
     comboStreak = 0;
     hasUsedSecondChance = false;
+    sessionStartedAtMs = Date.now();
     updateScore();
     gameOverScreen.classList.remove('show');
     secondChanceModal.classList.remove('show');
@@ -2600,7 +2622,7 @@ function checkGameOver() {
     gameOverTimeoutId = setTimeout(async () => {
         await waitForGameplayResume();
 
-        if (!hasUsedSecondChance && window.YandexSDK && window.YandexSDK.isAvailable()) {
+        if (!hasUsedSecondChance && window.GameAds && window.GameAds.hasProvider()) {
             pendingRewardShapes = generateRewardShapes();
             renderRewardShapes(pendingRewardShapes);
             showSecondChance();
@@ -2686,23 +2708,93 @@ splashOverlay.addEventListener('pointerdown', (e) => {
     }
 });
 
-restartBtn.addEventListener('click', startGame);
+// Решает, показывать ли interstitial при нажатии «Заново».
+// 'skip-revive' — игрок возродился за rewarded в этой сессии: показ гарантированно пропускается.
+// 'show'        — выполнены все условия (каждый N-й рестарт + долгая партия + интервал).
+// 'none'        — просто запускаем новую игру.
+function decideInterstitial(sessionDurationMs) {
+    if (skipNextInterstitial) return 'skip-revive';
+    if (!window.GameAds || !window.GameAds.hasProvider()) return 'none';
+    if (gamesSinceInterstitial < INTERSTITIAL_EVERY_N_GAMES) return 'none';
+    if (sessionDurationMs < INTERSTITIAL_MIN_SESSION_MS) return 'none';
+    if (lastInterstitialAtMs && (Date.now() - lastInterstitialAtMs) < INTERSTITIAL_MIN_INTERVAL_MS) {
+        return 'none';
+    }
+    return 'show';
+}
+
+function showInterstitialThenRestart() {
+    if (isInterstitialInFlight) {
+        return;
+    }
+    isInterstitialInFlight = true;
+    audioManager.suspend().catch(() => { });
+
+    let done = false;
+    const proceed = (wasShown) => {
+        if (done) return;
+        done = true;
+        isInterstitialInFlight = false;
+
+        if (wasShown) {
+            // Реклама реально показана — сбрасываем счётчик и таймер интервала.
+            gamesSinceInterstitial = 0;
+            lastInterstitialAtMs = Date.now();
+        }
+        // startGame() сам перезапустит аудио-сессию через beginGameSession().
+        startGame();
+    };
+
+    window.GameAds.showInterstitial({
+        onOpen: () => { syncGameplayState(); },
+        onError: () => { /* onClose всё равно сработает и продолжит игру */ },
+        onClose: (wasShown) => { proceed(wasShown); },
+    });
+
+    // Страховка на случай, если провайдер не вызовет колбэки.
+    setTimeout(() => proceed(false), INTERSTITIAL_FALLBACK_MS);
+}
+
+function handleRestartClick() {
+    // Партия завершена и игрок начинает новую сессию — экран Game Over уже отыграл роль
+    // психологического буфера, поэтому именно здесь принимаем решение о рекламе.
+    const sessionDurationMs = sessionStartedAtMs ? (Date.now() - sessionStartedAtMs) : 0;
+    gamesSinceInterstitial++;
+
+    const decision = decideInterstitial(sessionDurationMs);
+
+    if (decision === 'skip-revive') {
+        skipNextInterstitial = false;
+        gamesSinceInterstitial = 0;
+        startGame();
+        return;
+    }
+
+    if (decision === 'show') {
+        showInterstitialThenRestart();
+        return;
+    }
+
+    startGame();
+}
+
+restartBtn.addEventListener('click', handleRestartClick);
 
 if (secondChanceAdBtn) {
     secondChanceAdBtn.addEventListener('click', () => {
-        if (!window.YandexSDK || !window.YandexSDK.isAvailable()) {
-            // Фолбэк, если SDK вдруг недоступен
+        if (!window.GameAds || !window.GameAds.hasProvider()) {
+            // Фолбэк, если рекламные провайдеры недоступны
             window.open('https://gritsenko.biz', '_blank');
             applySecondChanceReward();
             return;
         }
 
-        window.YandexSDK.showRewardedVideo({
+        window.GameAds.showRewarded({
             onOpen: () => {
                 audioManager.suspend().catch(() => { });
                 syncGameplayState();
             },
-            onRewarded: () => {
+            onReward: () => {
                 applySecondChanceReward();
             },
             onClose: () => {
@@ -2710,7 +2802,8 @@ if (secondChanceAdBtn) {
                     audioManager.resume().catch(() => { });
                 }
 
-                // Если награда не получена, показываем game over
+                // Если награда не получена (отказ/ошибка), показываем Game Over —
+                // он же служит буфером перед возможным interstitial при «Заново».
                 if (!hasUsedSecondChance) {
                     pendingRewardShapes = null;
                     secondChanceModal.classList.remove('show');
@@ -2720,16 +2813,6 @@ if (secondChanceAdBtn) {
                 } else {
                     syncGameplayState();
                 }
-            },
-            onError: () => {
-                if (!isGameplayPausedBySdk) {
-                    audioManager.resume().catch(() => { });
-                }
-                pendingRewardShapes = null;
-                secondChanceModal.classList.remove('show');
-                finalizeBestScore();
-                gameOverScoreEl.textContent = formatNumber(score);
-                revealGameOverScreen();
             }
         });
     });
@@ -2747,6 +2830,10 @@ if (secondChanceSkipBtn) {
 
 function applySecondChanceReward() {
     hasUsedSecondChance = true;
+    // Игрок посмотрел rewarded и возродился: гарантированно пропускаем следующий
+    // interstitial и сбрасываем счётчик смертей (idle-баланс «реклама не подряд»).
+    skipNextInterstitial = true;
+    gamesSinceInterstitial = 0;
     secondChanceModal.classList.remove('show');
     isGameOverSequenceActive = false;
     gameContainer.classList.remove('game-over-transition');
