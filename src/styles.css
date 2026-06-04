@@ -96,14 +96,6 @@ body {
     background: url('./assets/theme/background-room.jpg') center / auto 100% no-repeat;
 }
 
-.game-container.shake {
-    animation: cameraShake 0.35s cubic-bezier(0.36, 0.07, 0.10, 0.37);
-}
-
-body.low-perf-effects .game-container.shake {
-    animation: cameraShakeLite 0.22s ease-out;
-}
-
 .game-container::after {
     content: '';
     position: absolute;
@@ -434,6 +426,14 @@ body.low-perf-effects .stat-panel {
     position: relative;
 }
 
+/* WebGL-канвас Pixi-рендера игрового поля (перекрывает .board внутри .board-container).
+   Точная позиция/размер задаются из JS (pixiRenderer.layout). z-index 3 — выше рамки доски
+   и ::after-подсветки (z2), но ниже combo-text (z1000) и попапов счёта. */
+.pixi-board-canvas {
+    display: block;
+    pointer-events: none;
+}
+
 /* Canvas для частиц */
 .particles-canvas {
     position: absolute;
@@ -563,23 +563,6 @@ body.low-perf-effects .block-item:not(.no-pop) {
         transform: scale(1);
         opacity: 1;
     }
-}
-
-@keyframes cameraShake {
-    0% { transform: translate3d(0, 0, 0) rotate(0deg); }
-    20% { transform: translate3d(-7px, 4px, 0) rotate(-0.7deg); }
-    40% { transform: translate3d(8px, -5px, 0) rotate(0.8deg); }
-    60% { transform: translate3d(-6px, -3px, 0) rotate(-0.5deg); }
-    80% { transform: translate3d(5px, 4px, 0) rotate(0.4deg); }
-    100% { transform: translate3d(0, 0, 0) rotate(0deg); }
-}
-
-@keyframes cameraShakeLite {
-    0% { transform: translate3d(0, 0, 0); }
-    25% { transform: translate3d(-3px, 2px, 0); }
-    50% { transform: translate3d(3px, -2px, 0); }
-    75% { transform: translate3d(-2px, -1px, 0); }
-    100% { transform: translate3d(0, 0, 0); }
 }
 
 .tray {

@@ -772,6 +772,42 @@ const BLOCK_PALETTES = {
     [COLORS.red]: { base: '#f03030' }
 };
 
+// URL текстур блоков для PixiJS-рендера — те же PNG, что и в CSS-классах (.block-color-*).
+const PIXI_BLOCK_TEXTURE_URLS = {
+    [COLORS.orange]: 'assets/theme/block-orange-v2.png',
+    [COLORS.blue]: 'assets/theme/block-blue-v2.png',
+    [COLORS.green]: 'assets/theme/block-green-v2.png',
+    [COLORS.purple]: 'assets/theme/block-purple-v2.png',
+    [COLORS.yellow]: 'assets/theme/block-yellow-v2.png',
+    [COLORS.red]: 'assets/theme/block-red-v2.png'
+};
+
+// --- ВЫБОР РЕНДЕРА (DOM | PixiJS) ---
+// Pixi рисует ДИНАМИКУ игрового поля (блоки/превью/анимации) в WebGL-канвасе, который
+// перекрывает только .board. DOM остаётся рабочим фолбэком и используется, если WebGL/PIXI
+// недоступны, при потере GL-контекста, либо принудительно по флагу ?renderer=dom.
+function resolveRendererPreference() {
+    try {
+        const q = new URLSearchParams(window.location.search).get('renderer');
+        if (q === 'dom' || q === 'pixi') return q;
+    } catch (e) { /* ignore */ }
+    try {
+        const stored = window.localStorage.getItem('renderer_pref');
+        if (stored === 'dom' || stored === 'pixi') return stored;
+    } catch (e) { /* ignore */ }
+    // Дефолт по платформе: на РЕАЛЬНОМ нативном мосту APK (window.AdsBridge) держим DOM до
+    // валидации WebView. Localhost-симулятор, веб и Яндекс -> Pixi по умолчанию.
+    const hasNativeBridge = !!(window.AdsBridge && typeof window.AdsBridge.showRewarded === 'function');
+    if (hasNativeBridge) return 'dom';
+    return 'pixi';
+}
+const RENDERER_PREFERENCE = resolveRendererPreference();
+function usePixi() {
+    return RENDERER_PREFERENCE === 'pixi'
+        && window.pixiRenderer
+        && window.pixiRenderer.available === true;
+}
+
 const SHAPES_DATA = [
     // 3x3 figures (most complex)
     { matrix: [[1, 1, 1], [1, 1, 1], [1, 1, 1]], color: COLORS.red }, // 3x3 square
@@ -914,7 +950,6 @@ const characterStateLayers = (() => {
 })();
 let characterStateRevertTimeoutId = null;
 let currentCharacterState = 'base';
-let pendingShakeAnimationFrameId = 0;
 let pendingComboAnimationFrameId = 0;
 const CHARACTER_STATE_HOLD_MS = 500;
 
@@ -997,6 +1032,55 @@ if (document.body) {
 }
 
 audioManager.setSoundEnabled(isSoundEnabled);
+
+// --- PixiJS-рендер игрового поля ---
+// Запускаем асинхронную инициализацию сразу при загрузке: к моменту тапа «Играть»
+// текстуры уже загружены. board-модель читается через замыкание (getColorAt), поэтому
+// переприсвоение board в initGame() корректно отслеживается.
+function initPixiRenderer() {
+    if (RENDERER_PREFERENCE !== 'pixi' || !window.pixiRenderer || typeof window.pixiRenderer.init !== 'function') {
+        return;
+    }
+    const boardContainer = document.querySelector('.board-container');
+    if (!boardContainer || !boardEl) return;
+
+    window.pixiRenderer.init({
+        boardContainer: boardContainer,
+        boardEl: boardEl,
+        boardSize: BOARD_SIZE,
+        blockTextures: PIXI_BLOCK_TEXTURE_URLS,
+        yellowToken: COLORS.yellow,
+        getColorAt: (r, c) => (board[r] ? (board[r][c] || null) : null),
+        lowPerf: isLowPerfParticleMode,
+        deviceMemory: reportedDeviceMemory,
+        onContextLost: handlePixiContextLost,
+        onContextRestored: handlePixiContextRestored
+    });
+}
+
+// Потеря GL-контекста: pixiRenderer уже выставил available=false -> usePixi() вернёт false.
+// Перерисовываем доску и трей в DOM из актуального состояния (живой фолбэк).
+function handlePixiContextLost() {
+    try {
+        renderBoard();
+        renderTray();
+    } catch (e) {
+        console.warn('DOM fallback after WebGL context loss failed:', e);
+    }
+}
+
+// Восстановление контекста: pixiRenderer сам пересобрал сцену и вернул available=true.
+// renderBoard() в pixi-ветке уберёт возможные DOM-блоки (boardHasDomBlocks) и синхронизирует канвас.
+function handlePixiContextRestored() {
+    try {
+        renderBoard();
+        renderTray();
+    } catch (e) {
+        console.warn('Re-render after WebGL context restore failed:', e);
+    }
+}
+
+initPixiRenderer();
 
 function updateSplashPlayButtonPosition() {
     if (!splashPlayBtn || !boardEl) return;
@@ -1140,6 +1224,11 @@ let gapSize = 3;
 let isDragging = false;
 let isAnimating = false;
 
+// Pixi-режим: показано ли сейчас превью на канвасе (для корректного снятия), и есть ли в
+// DOM-ячейках блоки (на случай переключения pixi<->dom).
+let pixiPreviewActive = false;
+let boardHasDomBlocks = false;
+
 const DRAG_GAIN_X = 1.35;
 const DRAG_GAIN_Y = 1.55;
 const DRAG_POPUP_LIFT_Y = 58;
@@ -1254,6 +1343,10 @@ function handleYandexPause() {
         cancelDrag();
     }
 
+    if (window.pixiRenderer && typeof window.pixiRenderer.stop === 'function') {
+        window.pixiRenderer.stop();
+    }
+
     audioManager.suspend().catch(() => { });
     syncGameplayState();
 }
@@ -1263,6 +1356,10 @@ function handleYandexResume() {
 
     if (hasGameStarted) {
         audioManager.resume().catch(() => { });
+    }
+
+    if (usePixi() && typeof window.pixiRenderer.start === 'function') {
+        window.pixiRenderer.start();
     }
 
     syncGameplayState();
@@ -1426,23 +1523,6 @@ function isThreeByThreeSquare(shape) {
         && shape.matrix.every(row => row.every(cell => cell === 1));
 }
 
-function triggerCameraShake() {
-    if (!gameContainer) return;
-
-    gameContainer.classList.remove('shake');
-
-    if (pendingShakeAnimationFrameId !== 0) {
-        cancelAnimationFrame(pendingShakeAnimationFrameId);
-    }
-
-    pendingShakeAnimationFrameId = requestAnimationFrame(() => {
-        pendingShakeAnimationFrameId = requestAnimationFrame(() => {
-            gameContainer.classList.add('shake');
-            pendingShakeAnimationFrameId = 0;
-        });
-    });
-}
-
 function finalizeBestScore() {
     if (score > bestScore) {
         saveBestScore(score);
@@ -1583,15 +1663,10 @@ function getCurrentCellSize() {
 function initGame() {
     clearPendingRefill();
     clearPendingGameOver();
-    if (pendingShakeAnimationFrameId !== 0) {
-        cancelAnimationFrame(pendingShakeAnimationFrameId);
-        pendingShakeAnimationFrameId = 0;
-    }
     if (dragElement) {
         dragElement.remove();
         dragElement = null;
     }
-    gameContainer.classList.remove('shake');
     gameContainer.classList.remove('game-over-transition');
     setCharacterState('base');
     closeSettingsModal();
@@ -1617,23 +1692,58 @@ function initGame() {
     syncGameplayState();
 }
 
-function renderBoard() {
-    if (boardEl.children.length === 0) {
-        // Пересоздаём ячейки и кэш ссылок на них (cellRefs) синхронно,
-        // чтобы дальше не дёргать getElementById в горячих путях.
-        cellRefs = [];
-        for (let r = 0; r < BOARD_SIZE; r++) {
-            cellRefs[r] = [];
-            for (let c = 0; c < BOARD_SIZE; c++) {
-                const cell = document.createElement('div');
-                cell.className = 'cell';
-                cell.id = `cell-${r}-${c}`;
-                boardEl.appendChild(cell);
-                cellRefs[r][c] = cell;
-            }
+// Создаёт 64 пустых .cell div + кэш cellRefs, если их ещё нет. Ячейки нужны ВСЕГДА (в обоих
+// режимах): они задают сетку/геометрию доски, дают фон-плитку для пустых клеток и координаты
+// для системы частиц (cell.getBoundingClientRect()). В pixi-режиме блоки в них не добавляются.
+function ensureBoardCells() {
+    if (boardEl.children.length !== 0) return;
+    cellRefs = [];
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        cellRefs[r] = [];
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            cell.id = `cell-${r}-${c}`;
+            boardEl.appendChild(cell);
+            cellRefs[r][c] = cell;
         }
     }
+    boardHasDomBlocks = false;
+}
 
+// Снимает DOM-блоки/превью с ячеек (при переключении pixi<->dom, чтобы не дублировать с канвасом).
+function clearDomBoardBlocks() {
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        const row = cellRefs[r];
+        if (!row) continue;
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            const cell = row[c];
+            if (!cell) continue;
+            if (cell.firstChild) cell.innerHTML = '';
+            cell.dataset.color = '';
+            cell.style.backgroundColor = '';
+            cell.classList.remove('preview', 'line-highlight');
+        }
+    }
+    previewCells.clear();
+    lineHighlightCells.clear();
+    boardHasDomBlocks = false;
+}
+
+function renderBoard() {
+    ensureBoardCells();
+
+    if (usePixi()) {
+        // Блоки рисует WebGL-канвас. Гарантируем, что в DOM-ячейках блоков нет
+        // (актуально при живом переключении с DOM-фолбэка).
+        if (boardHasDomBlocks) {
+            clearDomBoardBlocks();
+        }
+        window.pixiRenderer.syncBoard();
+        return;
+    }
+
+    // DOM-рендер блоков (фолбэк / ?renderer=dom): дифф состояния доски против DOM.
     for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
             const cell = cellRefs[r][c];
@@ -1655,6 +1765,7 @@ function renderBoard() {
             }
         }
     }
+    boardHasDomBlocks = true;
 }
 
 function createShapeHTML(shape, withPop = true) {
@@ -2176,7 +2287,7 @@ function updatePreview() {
         drawPreview(piece, coords.r, coords.c);
     } else {
         // Позиция недопустима — снимаем превью, если оно было.
-        if (previewCells.size > 0 || lineHighlightCells.size > 0) {
+        if (previewCells.size > 0 || lineHighlightCells.size > 0 || pixiPreviewActive) {
             clearPreview();
         }
         lastPreviewR = NaN;
@@ -2211,6 +2322,13 @@ function getBoardCoordinates() {
 }
 
 function clearPreview() {
+    if (usePixi()) {
+        if (pixiPreviewActive) {
+            window.pixiRenderer.clearPreview();
+            pixiPreviewActive = false;
+        }
+        return;
+    }
     // Быстрый путь: снимаем классы только с отслеживаемых ячеек (без обхода всего DOM).
     if (previewCells.size > 0 || lineHighlightCells.size > 0) {
         previewCells.forEach(cell => {
@@ -2263,6 +2381,29 @@ function hexToRgba(hex, alpha) {
 }
 
 function drawPreview(shape, startR, startC) {
+    if (usePixi()) {
+        if (!shape || startR < 0 || startC < 0) {
+            clearPreview();
+            return;
+        }
+        const hex = resolveShapeColor(shape);
+        const tint = (typeof hex === 'string' && hex[0] === '#') ? (parseInt(hex.slice(1), 16) || 0xffffff) : 0xffffff;
+        let rows = [];
+        let cols = [];
+        try {
+            const lineClear = wouldCreateLineClear(shape, startR, startC);
+            if (lineClear) {
+                rows = lineClear.rows || [];
+                cols = lineClear.cols || [];
+            }
+        } catch (e) {
+            console.error('drawPreview (pixi) line-clear check failed:', e);
+        }
+        window.pixiRenderer.drawPreview(shape, startR, startC, tint, rows, cols);
+        pixiPreviewActive = true;
+        return;
+    }
+
     // Снимаем предыдущее превью (по отслеживаемым ячейкам — дёшево). Один вызов, не два.
     clearPreview();
 
@@ -2366,7 +2507,6 @@ async function endDrag(e) {
         renderBoard();
 
         if (isThreeByThreeSquare(piece)) {
-            triggerCameraShake();
             playSound('hardPop');
         }
 
@@ -2449,6 +2589,10 @@ function refreshLayoutMetrics() {
     // Геометрия доски могла измениться (resize/смена ориентации) — пересчитаем лениво.
     cachedBoardRect = null;
     updateSplashPlayButtonPosition();
+    // Подгоняем WebGL-канвас под новый размер .board и перепозиционируем спрайты.
+    if (usePixi()) {
+        window.pixiRenderer.layout();
+    }
 }
 
 function canPlace(shape, startR, startC) {
@@ -2611,9 +2755,14 @@ async function checkLines(blocksPlaced) {
                     const rect = cell.getBoundingClientRect();
                     createParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, colorStr, 14);
 
-                    const blockEl = cell.querySelector('.block-item');
-                    if (blockEl) {
-                        blockEl.classList.add('clearing');
+                    if (usePixi()) {
+                        // GPU-анимация сжигания блока (scale->0 + fade) вместо CSS @keyframes blast.
+                        window.pixiRenderer.blastCell(r, c);
+                    } else {
+                        const blockEl = cell.querySelector('.block-item');
+                        if (blockEl) {
+                            blockEl.classList.add('clearing');
+                        }
                     }
                 }
 
@@ -2785,12 +2934,17 @@ function handleGlobalKeydown(event) {
     }
 }
 
-function startGame() {
+async function startGame() {
     splashOverlay.classList.add('hidden');
     closeSettingsModal();
     hasGameStarted = true;
     audioManager.beginGameSession().catch(() => { });
     haptic.confirm();
+    // Дожидаемся готовности Pixi (init стартовал ещё на загрузке — обычно уже резолвнут),
+    // чтобы первый рендер доски точно знал, доступен ли WebGL-рендер, и не мигал.
+    if (RENDERER_PREFERENCE === 'pixi' && window.pixiRenderer && window.pixiRenderer.ready) {
+        try { await window.pixiRenderer.ready; } catch (e) { /* фолбэк на DOM */ }
+    }
     initGame();
     syncGameplayState();
     void initializeYandexLifecycle();
@@ -2979,6 +3133,27 @@ window.addEventListener('resize', refreshLayoutMetrics);
 window.addEventListener('orientationchange', refreshLayoutMetrics);
 window.addEventListener('load', refreshLayoutMetrics);
 requestAnimationFrame(refreshLayoutMetrics);
+
+// Энергосбережение: останавливаем тикер Pixi, когда вкладка/окно неактивны.
+window.addEventListener('blur', () => {
+    if (window.pixiRenderer && typeof window.pixiRenderer.stop === 'function') {
+        window.pixiRenderer.stop();
+    }
+});
+window.addEventListener('focus', () => {
+    if (usePixi() && typeof window.pixiRenderer.start === 'function') {
+        window.pixiRenderer.start();
+    }
+});
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        if (window.pixiRenderer && typeof window.pixiRenderer.stop === 'function') {
+            window.pixiRenderer.stop();
+        }
+    } else if (usePixi() && typeof window.pixiRenderer.start === 'function') {
+        window.pixiRenderer.start();
+    }
+});
 
 const debugGameOverBtn = document.getElementById('debug-gameover-btn');
 if (debugGameOverBtn && isLocalDebugEnabled) {
