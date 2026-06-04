@@ -331,7 +331,10 @@ class ParticleSystem {
         this.config = {
             particleCountScale: isLowPerfParticleMode ? 0.35 : (isCoarsePointerDevice ? 0.5 : 1),
             landingParticleCount: isLowPerfParticleMode ? 1 : 2,
-            shadowBlur: isLowPerfParticleMode ? 0 : (isCoarsePointerDevice ? 3 : 6),
+            // shadowBlur на canvas — это размывающий проход на КАЖДУЮ частицу КАЖДЫЙ кадр.
+            // На тач-устройствах (где и видны просадки при сбросе линий) отключаем полностью;
+            // частицы остаются, пропадает только свечение.
+            shadowBlur: (isLowPerfParticleMode || isCoarsePointerDevice) ? 0 : 6,
             maxParticles: isLowPerfParticleMode ? 56 : (isCoarsePointerDevice ? 84 : 144),
             maxLandingParticles: isLowPerfParticleMode ? 12 : (isCoarsePointerDevice ? 18 : 30)
         };
@@ -1144,6 +1147,26 @@ const DRAG_POPUP_LIFT_Y = 58;
 // ОПТИМИЗАЦИЯ: переиспользуем объект координат и уменьшаем давление на GC
 const currentCoords = { r: -1, c: -1 };
 
+// ОПТИМИЗАЦИЯ драга: кэши и состояние превью между кадрами.
+// Цель — не делать тяжёлую работу на каждый pointermove (rAF-троттлинг,
+// кэш ссылок на ячейки и цвета, дифф превью вместо querySelectorAll).
+let cellRefs = [];                       // cellRefs[r][c] -> элемент ячейки (кэш вместо getElementById)
+let cachedBoardRect = null;              // boardEl.getBoundingClientRect(), кэшируется на старте драга
+let dragVirtualX = 0;                    // последняя виртуальная позиция драга (из onDragMove)
+let dragVirtualY = 0;
+let previewRafId = 0;                     // запланированный rAF для updatePreview (0 = нет)
+let lastPreviewR = NaN;                   // координаты ячейки прошлого апдейта превью (ранний выход)
+let lastPreviewC = NaN;
+let lastPreviewPieceIndex = -1;
+const previewCells = new Set();           // ячейки с классом 'preview' (текущий кадр)
+const lineHighlightCells = new Set();     // ячейки с классом 'line-highlight' (текущий кадр)
+const shapeColorCache = new Map();        // shape.color -> разрешённый hex (резолвим один раз)
+
+// Доступ к ячейке через кэш; на промахе — безопасный фолбэк на getElementById.
+function getCell(r, c) {
+    return (cellRefs[r] && cellRefs[r][c]) || document.getElementById(`cell-${r}-${c}`);
+}
+
 function canInteractWithGameplay() {
     return shouldGameplayBeActive();
 }
@@ -1596,19 +1619,24 @@ function initGame() {
 
 function renderBoard() {
     if (boardEl.children.length === 0) {
+        // Пересоздаём ячейки и кэш ссылок на них (cellRefs) синхронно,
+        // чтобы дальше не дёргать getElementById в горячих путях.
+        cellRefs = [];
         for (let r = 0; r < BOARD_SIZE; r++) {
+            cellRefs[r] = [];
             for (let c = 0; c < BOARD_SIZE; c++) {
                 const cell = document.createElement('div');
                 cell.className = 'cell';
                 cell.id = `cell-${r}-${c}`;
                 boardEl.appendChild(cell);
+                cellRefs[r][c] = cell;
             }
         }
     }
 
     for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
-            const cell = document.getElementById(`cell-${r}-${c}`);
+            const cell = cellRefs[r][c];
             const currentColor = cell.dataset.color || null;
             const targetColor = board[r][c];
 
@@ -2060,6 +2088,15 @@ function startDrag(e, index) {
     dragStartPointerX = clientX;
     dragStartPointerY = clientY;
 
+    // Кэшируем геометрию доски и стартовую позицию драга на время перетаскивания,
+    // сбрасываем «память» превью, чтобы первый апдейт гарантированно отрисовался.
+    cachedBoardRect = boardEl.getBoundingClientRect();
+    dragVirtualX = dragAnchorX;
+    dragVirtualY = dragAnchorY;
+    lastPreviewR = NaN;
+    lastPreviewC = NaN;
+    lastPreviewPieceIndex = -1;
+
     // Фигура появляется над центром слота, а не под точкой касания
     moveDrag(dragAnchorX, dragAnchorY);
 
@@ -2088,8 +2125,12 @@ function onDragMove(e) {
     const virtualX = dragAnchorX + dx;
     const virtualY = dragAnchorY + dy;
 
+    // Запоминаем позицию и сразу двигаем клон (дёшево, GPU-transform).
+    // Дорогой апдейт превью коалесим в один вызов на кадр.
+    dragVirtualX = virtualX;
+    dragVirtualY = virtualY;
     moveDrag(virtualX, virtualY);
-    updatePreview();
+    schedulePreviewUpdate();
 }
 
 function moveDrag(x, y) {
@@ -2098,11 +2139,49 @@ function moveDrag(x, y) {
     dragElement.style.transform = `translate3d(${x - dragOffsetX}px, ${y - dragOffsetY}px, 0)`;
 }
 
+// rAF-троттлинг: несколько pointermove за кадр сворачиваются в один updatePreview.
+function schedulePreviewUpdate() {
+    if (previewRafId !== 0) return;
+    previewRafId = requestAnimationFrame(() => {
+        previewRafId = 0;
+        if (!isDragging) return;
+        updatePreview();
+    });
+}
+
+// Отмена запланированного апдейта и сброс «памяти» превью (на завершении/отмене драга).
+function cancelPreviewUpdate() {
+    if (previewRafId !== 0) {
+        cancelAnimationFrame(previewRafId);
+        previewRafId = 0;
+    }
+    lastPreviewR = NaN;
+    lastPreviewC = NaN;
+    lastPreviewPieceIndex = -1;
+}
+
 function updatePreview() {
-    clearPreview();
     const coords = getBoardCoordinates();
-    if (coords && dragPieceIndex >= 0 && trayPieces[dragPieceIndex] && canPlace(trayPieces[dragPieceIndex], coords.r, coords.c)) {
-        drawPreview(trayPieces[dragPieceIndex], coords.r, coords.c);
+    const piece = dragPieceIndex >= 0 ? trayPieces[dragPieceIndex] : null;
+    const valid = coords && piece && canPlace(piece, coords.r, coords.c);
+
+    if (valid) {
+        // Ранний выход: та же ячейка и та же фигура — превью не изменится.
+        if (coords.r === lastPreviewR && coords.c === lastPreviewC && dragPieceIndex === lastPreviewPieceIndex) {
+            return;
+        }
+        lastPreviewR = coords.r;
+        lastPreviewC = coords.c;
+        lastPreviewPieceIndex = dragPieceIndex;
+        drawPreview(piece, coords.r, coords.c);
+    } else {
+        // Позиция недопустима — снимаем превью, если оно было.
+        if (previewCells.size > 0 || lineHighlightCells.size > 0) {
+            clearPreview();
+        }
+        lastPreviewR = NaN;
+        lastPreviewC = NaN;
+        lastPreviewPieceIndex = -1;
     }
 }
 
@@ -2113,11 +2192,15 @@ function getBoardCoordinates() {
         cellSize = getCurrentCellSize();
     }
 
-    const rect = dragElement.getBoundingClientRect();
-    const boardRect = boardEl.getBoundingClientRect();
+    // Доска при драге не двигается -> кэшируем её rect.
+    // Позиция клона нам известна (мы сами её задаём в moveDrag),
+    // поэтому НЕ читаем getBoundingClientRect у dragElement каждый кадр — это убирает форс reflow.
+    if (!cachedBoardRect) {
+        cachedBoardRect = boardEl.getBoundingClientRect();
+    }
 
-    const relX = rect.left - boardRect.left;
-    const relY = rect.top - boardRect.top;
+    const relX = (dragVirtualX - dragOffsetX) - cachedBoardRect.left;
+    const relY = (dragVirtualY - dragOffsetY) - cachedBoardRect.top;
 
     const c = Math.round(relX / (cellSize + gapSize));
     const r = Math.round(relY / (cellSize + gapSize));
@@ -2128,16 +2211,47 @@ function getBoardCoordinates() {
 }
 
 function clearPreview() {
+    // Быстрый путь: снимаем классы только с отслеживаемых ячеек (без обхода всего DOM).
+    if (previewCells.size > 0 || lineHighlightCells.size > 0) {
+        previewCells.forEach(cell => {
+            cell.classList.remove('preview');
+            cell.style.backgroundColor = '';
+        });
+        previewCells.clear();
+        lineHighlightCells.forEach(cell => {
+            cell.classList.remove('line-highlight');
+            cell.style.removeProperty('--line-preview-color');
+        });
+        lineHighlightCells.clear();
+        return;
+    }
+
+    // Фолбэк на случай рассинхрона состояния (используется только вне горячего пути).
     document.querySelectorAll('.cell.preview').forEach(el => {
         el.classList.remove('preview');
         el.style.backgroundColor = ''; // Reset custom background
     });
-
-    // Also clear any line highlights
     document.querySelectorAll('.cell.line-highlight').forEach(el => {
         el.classList.remove('line-highlight');
         el.style.removeProperty('--line-preview-color');
     });
+}
+
+// Резолвим цвет фигуры (CSS-var -> hex) один раз и кэшируем: цвета за драг не меняются.
+function resolveShapeColor(shape) {
+    const raw = shape && shape.color;
+    if (!raw) return '#888888';
+
+    const cached = shapeColorCache.get(raw);
+    if (cached) return cached;
+
+    let resolved = raw;
+    if (raw.includes('var(')) {
+        const varName = raw.replace('var(', '').replace(')', '').trim();
+        resolved = getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || '#888888';
+    }
+    shapeColorCache.set(raw, resolved);
+    return resolved;
 }
 
 // Helper function to convert hex color to RGBA
@@ -2149,7 +2263,7 @@ function hexToRgba(hex, alpha) {
 }
 
 function drawPreview(shape, startR, startC) {
-    // First clear all previous previews
+    // Снимаем предыдущее превью (по отслеживаемым ячейкам — дёшево). Один вызов, не два.
     clearPreview();
 
     // Validate inputs
@@ -2157,32 +2271,21 @@ function drawPreview(shape, startR, startC) {
         return;
     }
 
-    // Convert CSS variable to actual color value
-    const computedStyle = getComputedStyle(document.documentElement);
-    let shapeColor = shape.color;
-    if (shape.color && shape.color.includes('var(')) {
-        const varName = shape.color.replace('var(', '').replace(')', '').trim();
-        shapeColor = computedStyle.getPropertyValue(varName).trim();
-
-        // If the resolved color is empty, use a default
-        if (!shapeColor) {
-            shapeColor = '#888888'; // default gray
-        }
-    } else if (!shape.color) {
-        shapeColor = '#888888'; // default gray
-    }
+    // Цвет резолвится из кэша — без getComputedStyle на каждый апдейт.
+    const shapeColor = resolveShapeColor(shape);
 
     // Add preview styling to the shape cells
     for (let r = 0; r < shape.matrix.length; r++) {
         for (let c = 0; c < shape.matrix[0].length; c++) {
             if (shape.matrix && shape.matrix[r] && shape.matrix[r][c]) {
-                const cell = document.getElementById(`cell-${startR + r}-${startC + c}`);
+                const cell = getCell(startR + r, startC + c);
                 if (cell) {
                     cell.classList.add('preview');
 
                     // Apply the shape's color with reduced opacity (semi-transparent)
                     // ~0.5 opacity for preview
                     cell.style.backgroundColor = hexToRgba(shapeColor, 0.5);
+                    previewCells.add(cell);
                 }
             }
         }
@@ -2192,29 +2295,35 @@ function drawPreview(shape, startR, startC) {
     try {
         const wouldCauseLineClear = wouldCreateLineClear(shape, startR, startC);
         if (wouldCauseLineClear.rows.length > 0 || wouldCauseLineClear.cols.length > 0) {
-            // Highlight the lines that would be cleared with the shape's color
+            const lineColorInPreview = hexToRgba(shapeColor, 0.7);
+            const lineColorPlain = hexToRgba(shapeColor, 0.6);
+
+            // Highlight the lines that would be cleared with the shape's color.
+            // Принадлежность ячейки превью берём из previewCells (без classList.contains после записи).
             for (const row of wouldCauseLineClear.rows) {
                 for (let c = 0; c < BOARD_SIZE; c++) {
-                    const cell = document.getElementById(`cell-${row}-${c}`);
+                    const cell = getCell(row, c);
                     if (cell) {
                         cell.classList.add('line-highlight');
                         cell.style.setProperty(
                             '--line-preview-color',
-                            cell.classList.contains('preview') ? hexToRgba(shapeColor, 0.7) : hexToRgba(shapeColor, 0.6)
+                            previewCells.has(cell) ? lineColorInPreview : lineColorPlain
                         );
+                        lineHighlightCells.add(cell);
                     }
                 }
             }
 
             for (const col of wouldCauseLineClear.cols) {
                 for (let r = 0; r < BOARD_SIZE; r++) {
-                    const cell = document.getElementById(`cell-${r}-${col}`);
+                    const cell = getCell(r, col);
                     if (cell) {
                         cell.classList.add('line-highlight');
                         cell.style.setProperty(
                             '--line-preview-color',
-                            cell.classList.contains('preview') ? hexToRgba(shapeColor, 0.7) : hexToRgba(shapeColor, 0.6)
+                            previewCells.has(cell) ? lineColorInPreview : lineColorPlain
                         );
+                        lineHighlightCells.add(cell);
                     }
                 }
             }
@@ -2232,6 +2341,7 @@ async function endDrag(e) {
     }
 
     removeDragListeners();
+    cancelPreviewUpdate();
 
     const coords = getBoardCoordinates();
     const piece = trayPieces[dragPieceIndex];
@@ -2246,6 +2356,7 @@ async function endDrag(e) {
     isDragging = false;
     dragPieceIndex = -1;
     dragPointerType = 'mouse';
+    cachedBoardRect = null;
 
     if (coords && canPlace(piece, coords.r, coords.c)) {
         const blocksPlaced = placeShape(piece, coords.r, coords.c);
@@ -2264,7 +2375,7 @@ async function endDrag(e) {
                 if (piece.matrix[r][c]) {
                     const cellR = coords.r + r;
                     const cellC = coords.c + c;
-                    const cell = document.getElementById(`cell-${cellR}-${cellC}`);
+                    const cell = getCell(cellR, cellC);
                     if (cell) {
                         const rect = cell.getBoundingClientRect();
                         createLandingParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, piece.color);
@@ -2309,6 +2420,7 @@ function cancelDrag() {
     const savedDragPieceIndex = dragPieceIndex;
 
     removeDragListeners();
+    cancelPreviewUpdate();
 
     if (dragElement) {
         dragElement.remove();
@@ -2319,6 +2431,7 @@ function cancelDrag() {
     isDragging = false;
     dragPieceIndex = -1;
     dragPointerType = 'mouse';
+    cachedBoardRect = null;
 
     if (savedDragPieceIndex >= 0 && traySlots[savedDragPieceIndex]?.firstElementChild) {
         traySlots[savedDragPieceIndex].firstElementChild.style.opacity = '1';
@@ -2333,6 +2446,8 @@ function cancelDrag() {
 
 function refreshLayoutMetrics() {
     cellSize = getCurrentCellSize();
+    // Геометрия доски могла измениться (resize/смена ориентации) — пересчитаем лениво.
+    cachedBoardRect = null;
     updateSplashPlayButtonPosition();
 }
 
@@ -2417,7 +2532,7 @@ async function checkLines(blocksPlaced) {
     if (lastPlacementCoords) {
         const centerR = lastPlacementCoords.r;
         const centerC = lastPlacementCoords.c;
-        const cell = document.getElementById(`cell-${centerR}-${centerC}`);
+        const cell = getCell(centerR, centerC);
         if (cell) {
             const rect = cell.getBoundingClientRect();
             createScorePopup(rect.left + rect.width / 2, rect.top + rect.height / 2, `+${initialPoints}`);
@@ -2441,7 +2556,7 @@ async function checkLines(blocksPlaced) {
             if (lastPlacementCoords) {
                 const centerR = lastPlacementCoords.r;
                 const centerC = lastPlacementCoords.c;
-                const cell = document.getElementById(`cell-${centerR}-${centerC}`);
+                const cell = getCell(centerR, centerC);
                 if (cell) {
                     const rect = cell.getBoundingClientRect();
                     const praiseLines = getMessages().praiseLines;
@@ -2490,7 +2605,7 @@ async function checkLines(blocksPlaced) {
             // Последовательное исчезновение: от ближайших к последней установке к дальним
             for (const item of coordsArray) {
                 const [r, c] = item.coord.split(',').map(Number);
-                const cell = document.getElementById(`cell-${r}-${c}`);
+                const cell = getCell(r, c);
                 if (cell) {
                     const colorStr = board[r][c];
                     const rect = cell.getBoundingClientRect();

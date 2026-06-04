@@ -647,6 +647,17 @@ body.low-perf-effects .block-item:not(.no-pop) {
     will-change: transform;
 }
 
+/* Клон движется каждый кадр. drop-shadow на его блоках заставляет GPU
+   ре-растеризовать фильтр на каждый кадр перетаскивания (главная причина
+   просадок при драге). Тень у летящего клона незаметна — убираем её.
+   Для жёлтого сохраняем только цветокоррекцию (без дорогой drop-shadow). */
+.drag-clone .block-item {
+    filter: none;
+}
+.drag-clone .block-color-yellow {
+    filter: hue-rotate(-24deg) saturate(1.15) brightness(1.08);
+}
+
 .btn {
     flex: 1;
     padding: 12px 0;
@@ -679,6 +690,9 @@ body.low-perf-effects .block-item:not(.no-pop) {
 .clearing {
     animation: blast 0.3s forwards;
     z-index: 10;
+    /* Блок исчезает с масштабированием (blast). Масштаб + drop-shadow = ре-растеризация
+       фильтра на каждый кадр — на пропадающем блоке тень не нужна. */
+    filter: none;
 }
 
 /* ОПТИМИЗАЦИЯ: убран filter: brightness */
@@ -988,6 +1002,9 @@ body.low-perf-effects .combo-text.combo-pop {
     pointer-events: none;
     z-index: 2000;
     animation: scoreFloat 1s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+    /* Композитим scale/translate анимацию в отдельном слое, чтобы текст с тенью
+       не переотрисовывался на каждом кадре. */
+    will-change: transform, opacity;
 }
 
 body.low-perf-effects .score-popup {
@@ -1011,6 +1028,9 @@ body.low-perf-effects .score-popup {
     pointer-events: none;
     z-index: 2001;
     animation: praisePop 1.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    /* Композитим scale/rotate анимацию в отдельном слое: текст с обводкой и тенью
+       растеризуется один раз, а не на каждом кадре анимации «плашки хваления». */
+    will-change: transform, opacity;
 }
 
 body.low-perf-effects .praise-popup {
