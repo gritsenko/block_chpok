@@ -891,6 +891,8 @@ let isGameplayPausedBySdk = false;
 let isGameplayMarkedActive = false;
 let hasBoundYandexLifecycle = false;
 let yandexLifecycleInitPromise = null;
+let hasRequestedYandexGameReady = false;
+let isSplashPlayEnabled = true;
 let hasUsedSecondChance = false;
 let pendingRewardShapes = null;
 
@@ -1410,6 +1412,73 @@ async function initializeYandexLifecycle() {
     })();
 
     return yandexLifecycleInitPromise;
+}
+
+async function notifyYandexGameReadyForSplash() {
+    if (hasRequestedYandexGameReady) {
+        return;
+    }
+
+    if (hasGameStarted || !isSplashPlayEnabled || !splashOverlay || splashOverlay.classList.contains('hidden')) {
+        return;
+    }
+
+    hasRequestedYandexGameReady = true;
+
+    const trySend = () => {
+        if (!window.YandexSDK || typeof window.YandexSDK.gameReady !== 'function') {
+            return false;
+        }
+        return window.YandexSDK.gameReady();
+    };
+
+    if (trySend()) {
+        return;
+    }
+
+    try {
+        if (window.GameAds && typeof window.GameAds.whenYandexReady === 'function') {
+            await window.GameAds.whenYandexReady();
+            trySend();
+        }
+    } catch (error) {
+        console.warn('Failed to notify Yandex LoadingAPI.ready at splash:', error);
+    }
+}
+
+function setSplashPlayEnabled(enabled) {
+    isSplashPlayEnabled = !!enabled;
+
+    if (!splashPlayBtn) {
+        return;
+    }
+
+    splashPlayBtn.style.display = isSplashPlayEnabled ? '' : 'none';
+    splashPlayBtn.disabled = !isSplashPlayEnabled;
+    splashPlayBtn.setAttribute('aria-hidden', isSplashPlayEnabled ? 'false' : 'true');
+}
+
+async function prepareSplashPlayForYandex() {
+    const isYandexHostDetected = typeof YaGames !== 'undefined';
+
+    if (!isYandexHostDetected) {
+        setSplashPlayEnabled(true);
+        void notifyYandexGameReadyForSplash();
+        return;
+    }
+
+    setSplashPlayEnabled(false);
+
+    try {
+        if (window.YandexSDK && typeof window.YandexSDK.init === 'function') {
+            await window.YandexSDK.init();
+        }
+    } catch (error) {
+        console.warn('Failed to initialize Yandex SDK before showing splash Play button:', error);
+    } finally {
+        setSplashPlayEnabled(true);
+        void notifyYandexGameReadyForSplash();
+    }
 }
 
 function setSoundPreference(enabled) {
@@ -2903,6 +2972,7 @@ loadBestScore();
 syncSoundToggleUI();
 void initializeLanguage();
 void initializeYandexLifecycle();
+void prepareSplashPlayForYandex();
 
 async function syncBestScoreWithYandex() {
     if (window.YandexSDK && window.YandexSDK.isAvailable()) {
@@ -2970,8 +3040,16 @@ async function startGame() {
     }
 }
 
-// Start game on tap anywhere in the splash overlay
+// Start game only from the splash Play button.
 splashOverlay.addEventListener('pointerdown', (e) => {
+    if (hasGameStarted || !isSplashPlayEnabled) {
+        return;
+    }
+
+    if (splashPlayBtn && !splashPlayBtn.contains(e.target)) {
+        return;
+    }
+
     if (!hasGameStarted) {
         startGame();
     }

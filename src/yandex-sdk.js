@@ -12,6 +12,8 @@
     let player = null;
     let isInitialized = false;
     let initPromise = null;
+    let loadingReadyRequested = false;
+    let hasSentLoadingReady = false;
 
     function getLangFromUrl() {
         if (typeof window !== 'undefined' && window.location && window.location.search) {
@@ -93,9 +95,11 @@
                 bindLifecycleEvents();
                 console.log('[Yandex SDK] Инициализирован');
 
-                // LoadingAPI.ready() must be called BEFORE the game becomes playable
-                // (требование платформы 1.19). Player/storage init продолжается в фоне.
-                gameReady();
+                // Если игра уже запросила LoadingAPI.ready() до завершения init,
+                // отправляем событие сразу после появления ysdk.
+                if (loadingReadyRequested) {
+                    gameReady();
+                }
 
                 await initPlayer();
                 await setupSafeStorage();
@@ -537,10 +541,20 @@
      * Сообщает Yandex SDK, что игра загружена и готова (LoadingAPI.ready)
      */
     function gameReady() {
+        loadingReadyRequested = true;
+
+        if (hasSentLoadingReady) {
+            return true;
+        }
+
         if (ysdk && ysdk.features && ysdk.features.LoadingAPI && typeof ysdk.features.LoadingAPI.ready === 'function') {
             ysdk.features.LoadingAPI.ready();
+            hasSentLoadingReady = true;
             console.log('[Yandex SDK] Игра готова (LoadingAPI.ready)');
+            return true;
         }
+
+        return false;
     }
 
     /**
