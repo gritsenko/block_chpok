@@ -891,8 +891,9 @@ let isGameplayPausedBySdk = false;
 let isGameplayMarkedActive = false;
 let hasBoundYandexLifecycle = false;
 let yandexLifecycleInitPromise = null;
+let languageReadyPromise = null;
 let hasRequestedYandexGameReady = false;
-let isSplashPlayEnabled = true;
+let isSplashPlayEnabled = false;
 let hasUsedSecondChance = false;
 let pendingRewardShapes = null;
 
@@ -1415,11 +1416,10 @@ async function initializeYandexLifecycle() {
 }
 
 async function notifyYandexGameReadyForSplash() {
-    if (hasRequestedYandexGameReady) {
-        return;
-    }
-
-    if (hasGameStarted || !isSplashPlayEnabled || !splashOverlay || splashOverlay.classList.contains('hidden')) {
+    // Intentionally NOT gated on isSplashPlayEnabled: LoadingAPI.ready() must be sent
+    // while Play is still disabled, so GameReady fires before the game is playable
+    // (platform requirement 1.19). See prepareSplashPlayForYandex for the ordering.
+    if (hasRequestedYandexGameReady || hasGameStarted || !splashOverlay) {
         return;
     }
 
@@ -1459,25 +1459,24 @@ function setSplashPlayEnabled(enabled) {
 }
 
 async function prepareSplashPlayForYandex() {
-    const isYandexHostDetected = typeof YaGames !== 'undefined';
-
-    if (!isYandexHostDetected) {
-        setSplashPlayEnabled(true);
-        void notifyYandexGameReadyForSplash();
-        return;
-    }
-
+    // Order matters and enforces two platform requirements:
+    //   1. Keep Play hidden until the SDK language is applied, so the whole UI appears
+    //      in the correct language from the first frame (requirement 2.14).
+    //   2. Dispatch LoadingAPI.ready() BEFORE enabling Play, so the player can never
+    //      start the game before GameReady fires (requirement 1.19). The splash start
+    //      handler is gated on isSplashPlayEnabled, so a disabled button = not playable.
     setSplashPlayEnabled(false);
 
     try {
-        if (window.YandexSDK && typeof window.YandexSDK.init === 'function') {
-            await window.YandexSDK.init();
-        }
+        await whenLanguageReady();
+        // Tell the platform the game is fully loaded BEFORE making Play interactive.
+        await notifyYandexGameReadyForSplash();
     } catch (error) {
-        console.warn('Failed to initialize Yandex SDK before showing splash Play button:', error);
+        console.warn('Failed to prepare splash Play button:', error);
     } finally {
+        // Always reveal Play eventually, even if the SDK errored — never leave the
+        // game permanently unplayable.
         setSplashPlayEnabled(true);
-        void notifyYandexGameReadyForSplash();
     }
 }
 
@@ -1508,11 +1507,14 @@ async function initializeLanguage() {
         return;
     }
 
+    // Show something immediately (browser language) while the SDK loads. On Yandex this
+    // stays hidden behind the platform loader until LoadingAPI.ready() fires, so the user
+    // never sees the pre-SDK language.
     const initialLang = typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE;
     applyTranslations(initialLang);
 
-    // The Yandex SDK is now loaded lazily by platform.js — wait for that to settle
-    // before reading the platform language.
+    // The Yandex SDK is loaded lazily by platform.js — wait for that to settle, then init
+    // the SDK and switch to the language it reports (requirement 2.14: auto-detect via SDK).
     if (window.GameAds && typeof window.GameAds.whenYandexReady === 'function') {
         await window.GameAds.whenYandexReady();
     }
@@ -1521,28 +1523,25 @@ async function initializeLanguage() {
         return;
     }
 
-    const applyYandexLanguage = async () => {
+    try {
         await window.YandexSDK.init();
         if (window.YandexSDK.isAvailable() && typeof window.YandexSDK.getLanguage === 'function') {
             applyTranslations(window.YandexSDK.getLanguage());
-            return true;
-        }
-        return false;
-    };
-
-    try {
-        const applied = await applyYandexLanguage();
-        if (!applied) {
-            setTimeout(() => {
-                applyYandexLanguage().catch(() => { });
-            }, 1000);
-            setTimeout(() => {
-                applyYandexLanguage().catch(() => { });
-            }, 2500);
         }
     } catch (error) {
         console.warn('Failed to resolve Yandex language:', error);
     }
+}
+
+// Single shared startup so the splash gate and the bootstrap await the same language
+// resolution instead of racing two independent SDK reads.
+function whenLanguageReady() {
+    if (!languageReadyPromise) {
+        languageReadyPromise = initializeLanguage().catch(error => {
+            console.warn('Language initialization failed:', error);
+        });
+    }
+    return languageReadyPromise;
 }
 
 function loadBestScore() {
@@ -2970,7 +2969,7 @@ function checkGameOver() {
 applyTranslations(currentLanguage);
 loadBestScore();
 syncSoundToggleUI();
-void initializeLanguage();
+void whenLanguageReady();
 void initializeYandexLifecycle();
 void prepareSplashPlayForYandex();
 

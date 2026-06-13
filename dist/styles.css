@@ -1182,7 +1182,9 @@ body.low-perf-effects .praise-popup {
     pointer-events: auto;
     z-index: 1;
     transform: translate(-50%, -50%);
-    /* display: none; */
+    /* Hidden by default via the inline `display:none` in index.html so the button is
+       never visible or clickable before game.js runs. game.js reveals it via
+       setSplashPlayEnabled(true) only after LoadingAPI.ready() fires (requirement 1.19). */
 }
 
 .splash-play-btn:active {
