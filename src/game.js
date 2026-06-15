@@ -1311,7 +1311,12 @@ function clearPendingGameOver() {
 }
 
 function shouldGameplayBeActive() {
-    return !settingsModal.classList.contains('show')
+    // Gameplay must only be active during real play — not while the splash/Play
+    // button is still shown. Yandex's "Gameplay is active" indicator otherwise
+    // turns green before the player ever presses Play (requirement: GameplayAPI.start
+    // fires on actual gameplay start, not on the menu screen).
+    return hasGameStarted
+        && !settingsModal.classList.contains('show')
         && !gameOverScreen.classList.contains('show')
         && !secondChanceModal.classList.contains('show')
         && !isGameOverSequenceActive
