@@ -188,6 +188,7 @@
     let modalEl = null;
     let bannerEl = null;
     let hudEl = null;
+    let hudTopEl = null;
     let hudLevelEl = null;
     let hudMovesEl = null;
     let hudGoalsEl = null;
@@ -946,6 +947,9 @@
     // ------------------------------------------------------------------
     function ensureHudRefs() {
         if (!hudEl) hudEl = document.getElementById('adventure-hud');
+        // Уровень и ходы живут в ряду плашки счёта (.header-stats), цели — отдельным
+        // рядом ниже, поэтому видимость переключаем у обоих контейнеров.
+        if (!hudTopEl) hudTopEl = document.getElementById('adventure-hud-top');
         if (!hudLevelEl) hudLevelEl = document.getElementById('adventure-hud-level');
         if (!hudMovesEl) hudMovesEl = document.getElementById('adventure-moves-value');
         if (!hudGoalsEl) hudGoalsEl = document.getElementById('adventure-goals');
@@ -991,6 +995,7 @@
 
         const active = !!run && !run.resolved;
         hudEl.hidden = !run;
+        if (hudTopEl) hudTopEl.hidden = !run;
 
         if (!run) {
             document.body.classList.remove('adv-goals-many');
@@ -1554,6 +1559,9 @@
             closeModal();
             closeMap();
             finishRun();
+            // Без перерисовки уровень/ходы и цели остались бы висеть в шапке классики.
+            renderHud();
+            renderBoosters();
             if (core()) core().startGame({ mode: core().MODE_ENDLESS });
         }));
 
