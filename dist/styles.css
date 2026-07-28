@@ -114,9 +114,11 @@ body {
     background: url('./assets/theme/background-room.jpg') center / auto 100% no-repeat;
 }
 
-/* Ряд HUD приключения — ещё один этаж в шапке, доска на него сужается. */
+/* Ряд целей приключения — ещё один этаж в шапке, доска на него сужается.
+   Значение здесь — только стартовая оценка: реальную высоту ряда меряет
+   adventure.js (syncHudBudget) и переопределяет переменную инлайном. */
 body.mode-adventure .game-container {
-    --hud-h: 50px;
+    --hud-h: 40px;
 }
 
 .game-container::after {
@@ -1115,7 +1117,7 @@ body.low-perf-effects .praise-popup {
         --chrome-h: 114px;
     }
     body.mode-adventure .game-container {
-        --hud-h: 48px;
+        --hud-h: 38px;
     }
     .header {
         margin-bottom: 10px;
@@ -1149,7 +1151,7 @@ body.low-perf-effects .praise-popup {
         --chrome-h: 100px;
     }
     body.mode-adventure .game-container {
-        --hud-h: 46px;
+        --hud-h: 36px;
     }
     .header {
         margin-bottom: 8px;
@@ -1356,7 +1358,7 @@ body.low-perf-effects .praise-popup {
         --chrome-h: 80px;
     }
     body.mode-adventure .game-container {
-        --hud-h: 40px;
+        --hud-h: 32px;
     }
     .header {
         margin-bottom: 5px;
@@ -1726,45 +1728,42 @@ body.hammer-armed .board {
     display: none;
 }
 
-/* Ряд HUD добавляет высоту в .header (justify-content: flex-end), из-за чего панель
-   счёта поднимается под кнопку настроек в левом верхнем углу. Панель «Рекорд» в
-   приключении скрыта, поэтому просто прижимаем оставшийся счёт вправо — коллизии
-   с шестерёнкой больше нет ни на одном вьюпорте. */
+/* Панель «Рекорд» в приключении скрыта, а её место в ряду занимает группа
+   «уровень + ходы»: она стоит слева, счёт — справа. */
 .mode-adventure .header-stats {
-    justify-content: flex-end;
+    justify-content: space-between;
 }
 
-/* Одна строка, без переноса: HUD добавляется в конец .header (justify-content: flex-end),
-   поэтому каждый лишний ряд поднимает панели счёта вверх — прямо под кнопку настроек.
-   Цели при нехватке места скроллятся по горизонтали, а не переносятся. */
+/* Ряд условий победы: только чипы целей, по центру и без подложки — плашка тут
+   была лишним этажом в шапке и отжимала доску вниз. */
 .adventure-hud {
     position: relative;
-    /* Ниже .board-container (z-index 2): нижняя кромка бара уходит ЗА игровое
-       поле. Скрытая часть — это padding-bottom, поэтому текст и иконки целиком
-       остаются на виду, а по вертикали бар занимает меньше, чем его высота. */
     z-index: 1;
     display: flex;
     align-items: center;
+    justify-content: center;
     flex-wrap: wrap;
-    gap: 8px 10px;
+    gap: 6px 8px;
     margin-top: 6px;
-    margin-bottom: -22px;
-    padding: 6px 12px 26px;
-    border-radius: 18px;
-    background: linear-gradient(180deg, rgba(255, 240, 214, 0.92) 0%, rgba(246, 214, 163, 0.92) 100%);
-    border: 2px solid #9b6134;
-    box-shadow: 0 3px 0 #8a542d, 0 6px 12px rgba(74, 39, 19, 0.22);
+    padding: 0 6px;
 }
 
 .adventure-hud[hidden] {
     display: none;
 }
 
+/* Уровень и ходы — элемент .header-stats, поэтому по вертикали их выравнивает
+   ряд (align-items: flex-end): низ пилюли ходов встаёт на низ плашки счёта. */
 .adventure-hud-top {
     display: flex;
     align-items: center;
     gap: 10px;
     flex: 0 0 auto;
+    padding-bottom: 2px;
+}
+
+.adventure-hud-top[hidden] {
+    display: none;
 }
 
 /* Размеры HUD растут с шириной экрана и упираются в потолок «дизайнерских»
@@ -1776,6 +1775,8 @@ body.hammer-armed .board {
     color: #5b311d;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    /* Плашки под текстом больше нет — светлый ореол держит читаемость на фоне комнаты. */
+    text-shadow: 0 1px 0 rgba(255, 248, 236, 0.85), 0 0 6px rgba(255, 245, 225, 0.7);
 }
 
 .adventure-moves {
@@ -1785,7 +1786,10 @@ body.hammer-armed .board {
     padding: 2px 12px;
     border-radius: 999px;
     background: linear-gradient(180deg, #4cb6f0 0%, #2e8ac7 100%);
-    box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.45);
+    /* Пилюля стоит на фоне комнаты, а не на плашке: кант и тень отделяют её от фона
+       так же, как у плашки счёта рядом. */
+    border: 2px solid #1c5d8a;
+    box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.5), 0 3px 0 #1c5d8a, 0 5px 9px rgba(74, 39, 19, 0.25);
     color: #fff;
     font-weight: 900;
     font-size: clamp(19px, 6vw, 26px);
@@ -1816,7 +1820,7 @@ body.hammer-armed .board {
     flex-wrap: wrap;
     gap: 6px;
     flex: 1 1 auto;
-    justify-content: flex-end;
+    justify-content: center;
     scrollbar-width: none;
     padding: 2px 0;
 }
@@ -1833,8 +1837,11 @@ body.hammer-armed .board {
     gap: 6px;
     padding: 2px 11px 2px 6px;
     border-radius: 999px;
-    background: rgba(109, 63, 49, 0.16);
-    border: 1.5px solid rgba(109, 63, 49, 0.3);
+    /* Общей плашки под целями нет, поэтому подложка живёт в самом чипе — иначе
+       полупрозрачный коричневый растворялся на фоне комнаты. */
+    background: linear-gradient(180deg, rgba(255, 242, 218, 0.95) 0%, rgba(246, 214, 163, 0.95) 100%);
+    border: 1.5px solid #9b6134;
+    box-shadow: 0 2px 0 rgba(138, 84, 45, 0.9), 0 4px 8px rgba(74, 39, 19, 0.2);
     color: #4a2a15;
     font-size: clamp(15px, 4.6vw, 20px);
     font-weight: 900;
@@ -1854,16 +1861,10 @@ body.adv-goals-many .adv-chip-icon {
     height: clamp(17px, 5.2vw, 22px);
 }
 
-/* Целый ряд под цели: иначе чипы «доламываются» вокруг номера уровня и счётчика
-   ходов и раскладка выглядит случайной. */
-body.adv-goals-many .adventure-goals {
-    flex-basis: 100%;
-    justify-content: flex-start;
-}
-
 .adv-chip-done {
-    background: rgba(102, 204, 51, 0.28);
-    border-color: rgba(56, 130, 20, 0.55);
+    background: linear-gradient(180deg, rgba(216, 246, 190, 0.95) 0%, rgba(166, 222, 124, 0.95) 100%);
+    border-color: #4f8a24;
+    box-shadow: 0 2px 0 rgba(56, 110, 20, 0.9), 0 4px 8px rgba(30, 70, 12, 0.18);
     color: #2f6d0f;
 }
 
@@ -2696,9 +2697,7 @@ body.low-perf-effects .adv-node-current {
 @media (max-height: 750px) {
     .adventure-hud {
         margin-top: 5px;
-        margin-bottom: -20px;
-        padding: 5px 10px 24px;
-        gap: 6px 8px;
+        gap: 5px 7px;
     }
 
     .adv-booster {
@@ -2727,9 +2726,7 @@ body.low-perf-effects .adv-node-current {
 @media (max-height: 620px) {
     .adventure-hud {
         margin-top: 4px;
-        margin-bottom: -18px;
-        padding: 4px 9px 21px;
-        gap: 5px 7px;
+        gap: 4px 6px;
     }
 
     .adventure-hud-level {
@@ -2773,15 +2770,13 @@ body.low-perf-effects .adv-node-current {
         z-index: 6;
     }
 
-    /* Левая колонка узкая: строка «УР. N + ходы + цели» в неё не влезала и
-       чипы целей обрезались по краю панели. Разрешаем перенос — вертикального
-       места в колонке достаточно. */
+    /* Левая колонка узкая (~150px): цели переносятся по строкам и выравниваются
+       по левому краю колонки, а не по центру — так они читаются как список. */
     .adventure-hud {
         flex-wrap: wrap;
         row-gap: 5px;
-        /* Доски рядом нет — прятать нижнюю кромку не за что. */
-        margin-bottom: 0;
-        padding-bottom: 6px;
+        justify-content: flex-start;
+        padding: 0;
     }
 
     .adventure-goals {

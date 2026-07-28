@@ -69,6 +69,14 @@
         </div>
         <button class="settings-btn" id="settings-btn" type="button" aria-label="Open settings"></button>
         <div class="header-stats">
+            <!-- Номер уровня и остаток ходов стоят в одну линию с плашкой счёта;
+                 в классике скрыты. Наполняет adventure.js. -->
+            <div class="adventure-hud-top" id="adventure-hud-top" hidden>
+                <span class="adventure-hud-level" id="adventure-hud-level"></span>
+                <span class="adventure-moves">
+                    <span class="adventure-moves-value" id="adventure-moves-value">0</span>
+                </span>
+            </div>
             <div class="stat-panel score-panel">
                 <div class="stat-panel-ribbon" id="score-label">СЧЁТ:</div>
                 <div class="stat-panel-body score-panel-body">
@@ -84,15 +92,9 @@
                 </div>
             </div>
         </div>
-        <!-- HUD приключения: номер уровня, остаток ходов и чипы целей.
+        <!-- Ряд условий победы: чипы целей по центру, без плашки-подложки.
              Наполняется из adventure.js, в классике скрыт. -->
         <div class="adventure-hud" id="adventure-hud" hidden>
-            <div class="adventure-hud-top">
-                <span class="adventure-hud-level" id="adventure-hud-level"></span>
-                <span class="adventure-moves">
-                    <span class="adventure-moves-value" id="adventure-moves-value">0</span>
-                </span>
-            </div>
             <div class="adventure-goals" id="adventure-goals"></div>
         </div>
 
