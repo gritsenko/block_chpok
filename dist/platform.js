@@ -3,19 +3,30 @@
  *
  * Public contract: window.GameAds (see GAME_ADS_API.md).
  *   GameAds.platform                                       // 'native' | 'web'
+ *   GameAds.provider()                                     // which host answers right now
  *   GameAds.hasProvider()                                  // any provider available
  *   GameAds.showRewarded({ onOpen, onReward, onError, onClose })
  *   GameAds.showInterstitial({ onOpen, onError, onClose })
  *   GameAds.isRewardedReady() / isInterstitialReady()
  *   GameAds.showBanner() / hideBanner() / isBannerVisible()
  *   GameAds.whenYandexReady()                              // promise<boolean>
+ *   GameAds.levelComplete(level, params) / logEvent(name, params)
+ *   GameAds.getUserId() / isRewardMode() / getGameId()
  *
- * Three environments, zero game-code changes:
- *   1. Android APK shell  — native @JavascriptInterface (window.AdsBridge) is detected
- *                           and wrapped synchronously. AppLovin MAX shows real ads.
- *   2. Yandex Games       — Yandex SDK is lazy-loaded; ads come from Yandex.
- *   3. Browser / localhost — built-in simulator. Tweak window.__adsSim from devtools
+ * Four environments, zero game-code changes:
+ *   1. window.Jam host    — the MY.GAMES JAM portal (jam-sdk.js, mock ad player) and
+ *                           rnd-lab APK builds (jam-compat.js → RewardHub → AppLovin).
+ *                           One contract, both places: jam.my.games/docs/game-bridge-contract.md.
+ *   2. Android APK shell  — native @JavascriptInterface (window.AdsBridge) is detected
+ *                           and wrapped. AppLovin MAX shows real ads.
+ *   3. Yandex Games       — Yandex SDK is lazy-loaded; ads come from Yandex.
+ *   4. Browser / localhost — built-in simulator. Tweak window.__adsSim from devtools
  *                           to exercise every callback branch.
+ *
+ * Jam is preferred over the raw native bridge deliberately: both end up in the same
+ * AppLovin call, but only the Jam/RewardHub path also carries progress events, custom
+ * events and ILRD attribution. Reaching for AdsBridge directly is the fallback for a
+ * shell that ships no SDK.
  *
  * Callback contract is identical across providers:
  *   • onClose ALWAYS fires exactly once and last (even on errors / no provider).
@@ -32,8 +43,8 @@
     // The raw @JavascriptInterface installed by the APK shell, if any.
     const rawBridge = (typeof window !== 'undefined') ? window.AdsBridge : null;
 
-    // Internal adapter the public facade calls into.
-    // null when no provider was selected (web fallback path uses Yandex SDK or no-op).
+    // The wrapped raw-native adapter. Stays null until localAdapter() builds it on
+    // first use — see §3 for why this must not happen at load time.
     let adapter = null;
 
     // -----------------------------------------------------------------------
@@ -217,13 +228,48 @@
         };
     }
 
-    // Provider selection — native first, simulator second. If both fail we fall
-    // through to Yandex SDK below (web environments) or to a no-op (everywhere else).
-    adapter = buildNativeAdapter() || buildSimulator();
-    const platform = adapter ? 'native' : 'web';
+    // -----------------------------------------------------------------------
+    // 3. Host facades we do NOT create: window.Jam (jam-sdk.js on the JAM portal,
+    //    jam-compat.js in an rnd-lab APK) and window.AdsManager (rnd-lab ads-bridge.js).
+    //    Both are resolved LAZILY, on every call, for two reasons:
+    //      • rnd-lab's build_service inserts their <script> tags before </head>, i.e.
+    //        AFTER this file — neither object exists while we are being evaluated;
+    //      • ads-bridge.js installs its own window.__adsCallback. Building our raw
+    //        native adapter eagerly would let that overwrite ours, and every rewarded
+    //        show would then hang with no onClose. So the raw adapter is built on
+    //        first use, and only once we know no higher-level facade answered.
+    // -----------------------------------------------------------------------
+    function jamBridge() {
+        const j = window.Jam || window.jam;
+        if (!j || typeof j.showRewarded !== 'function') return null;
+        // jam-sdk reports available=false with no simulator parent to talk to;
+        // jam-compat mirrors RewardHub.available. Either way: no host, no ads.
+        return j.available === false ? null : j;
+    }
+
+    function hubAdsManager() {
+        const m = window.AdsManager;
+        if (!m || !m.available || typeof m.showRewardedVideo !== 'function') return null;
+        return m;
+    }
+
+    const simAdapter = buildSimulator();
+    let rawAdapterResolved = false;
+
+    // Raw native bridge / simulator — the local adapters, in that order.
+    function localAdapter() {
+        if (!rawAdapterResolved) {
+            rawAdapterResolved = true;
+            adapter = buildNativeAdapter();
+        }
+        return adapter || simAdapter;
+    }
+
+    const hasRawBridge = !!(rawBridge && typeof rawBridge.showRewarded === 'function');
+    const platform = (hasRawBridge || simAdapter) ? 'native' : 'web';
 
     // -----------------------------------------------------------------------
-    // 3. Yandex Games SDK — lazy-loaded only when no adapter was selected.
+    // 4. Yandex Games SDK — lazy-loaded only when no other host was detected.
     //    /sdk.js is served by the Yandex platform; outside it we still try
     //    yandex-sdk.js so window.YandexSDK exists and reports unavailable.
     // -----------------------------------------------------------------------
@@ -241,9 +287,17 @@
         });
     }
 
-    if (adapter) {
+    // A host bridge already present at load means Yandex is not our platform. Skipping
+    // the fetch matters on the JAM portal: /sdk.js 404s there, and every consumer of
+    // whenYandexReady() (splash gate, language) would wait out that round trip for nothing.
+    const hostAtLoad = hasRawBridge ? 'native bridge'
+        : simAdapter ? 'localhost simulator'
+        : jamBridge() ? 'window.Jam host'
+        : null;
+
+    if (hostAtLoad) {
         resolveYandexReady(false);
-        console.log('[platform] ' + (rawBridge ? 'native bridge' : 'localhost simulator') + ' ready — Yandex SDK skipped.');
+        console.log('[platform] ' + hostAtLoad + ' ready — Yandex SDK skipped.');
     } else {
         loadScript('/sdk.js')
             .catch(() => { /* not served by this host */ })
@@ -253,15 +307,32 @@
     }
 
     // -----------------------------------------------------------------------
-    // 4. Provider detection + public facade.
+    // 5. Provider detection + public facade.
     // -----------------------------------------------------------------------
-    function hasNative() { return !!(adapter && adapter.available); }
+    function hasJam() { return !!jamBridge(); }
+    function hasHub() { return !!hubAdsManager(); }
+    function hasLocal() {
+        const a = localAdapter();
+        return !!(a && a.available);
+    }
     function hasYandex() {
         return !!(window.YandexSDK
             && typeof window.YandexSDK.isAvailable === 'function'
             && window.YandexSDK.isAvailable());
     }
-    function hasProvider() { return hasNative() || hasYandex(); }
+    // Order is the resolution order used by every show* below, and the ||
+    // short-circuit is load-bearing: with a Jam host present we never build the
+    // raw adapter, so ads-bridge.js keeps sole ownership of window.__adsCallback.
+    function hasProvider() { return hasJam() || hasHub() || hasLocal() || hasYandex(); }
+
+    // Which host would actually serve the next ad. Evaluated on read, unlike `platform`.
+    function provider() {
+        if (hasJam()) return 'jam';
+        if (hasHub()) return 'hub';
+        if (hasLocal()) return localAdapter() === simAdapter ? 'sim' : 'native';
+        if (hasYandex()) return 'yandex';
+        return 'none';
+    }
 
     function safe(fn, arg) {
         if (typeof fn !== 'function') return;
@@ -280,8 +351,24 @@
         const onOpen = () => safe(cb.onOpen);
         const onError = (result) => { errored = true; safe(cb.onError, result || { status: 'error' }); };
 
-        if (hasNative()) {
-            adapter.showInterstitial({
+        if (hasJam()) {
+            jamBridge().showInterstitial({
+                onOpen: onOpen,
+                onError: onError,
+                onClose: () => finish(!errored),
+            });
+            return 'jam';
+        }
+        if (hasHub()) {
+            hubAdsManager().showInterstitial({
+                onOpen: onOpen,
+                onError: onError,
+                onClose: () => finish(!errored),
+            });
+            return 'hub';
+        }
+        if (hasLocal()) {
+            localAdapter().showInterstitial({
                 onOpen: onOpen,
                 onError: onError,
                 onClose: () => finish(!errored),
@@ -314,8 +401,26 @@
         const onReward = () => safe(cb.onReward);
         const onError = (result) => { errored = true; safe(cb.onError, result || { status: 'error' }); };
 
-        if (hasNative()) {
-            adapter.showRewarded({
+        if (hasJam()) {
+            jamBridge().showRewarded({
+                onOpen: onOpen,
+                onReward: onReward,
+                onError: onError,
+                onClose: () => finish(!errored),
+            });
+            return 'jam';
+        }
+        if (hasHub()) {
+            hubAdsManager().showRewardedVideo({
+                onOpen: onOpen,
+                onReward: onReward,
+                onError: onError,
+                onClose: () => finish(!errored),
+            });
+            return 'hub';
+        }
+        if (hasLocal()) {
+            localAdapter().showRewarded({
                 onOpen: onOpen,
                 onReward: onReward,
                 onError: onError,
@@ -337,23 +442,42 @@
         return 'none';
     }
 
+    // Neither window.Jam nor the portal's mock player exposes preload state — the JAM
+    // contract has no readiness call at all. Report ready: a genuine 'not_ready' still
+    // arrives through onError (the mock even enforces a 30 s frequency cap), whereas
+    // answering false here would hide the offer permanently on a host that can show ads.
     function isInterstitialReady() {
-        if (hasNative() && typeof adapter.isInterstitialReady === 'function') {
-            return !!adapter.isInterstitialReady();
+        if (hasJam()) return true;
+        if (hasHub()) {
+            try { return !!hubAdsManager().isInterstitialReady(); } catch (e) { return false; }
+        }
+        const a = hasLocal() ? localAdapter() : null;
+        if (a && typeof a.isInterstitialReady === 'function') {
+            return !!a.isInterstitialReady();
         }
         return hasYandex();
     }
 
     function isRewardedReady() {
-        if (hasNative() && typeof adapter.isRewardedReady === 'function') {
-            return !!adapter.isRewardedReady();
+        if (hasJam()) return true;
+        if (hasHub()) {
+            try { return !!hubAdsManager().isRewardedReady(); } catch (e) { return false; }
+        }
+        const a = hasLocal() ? localAdapter() : null;
+        if (a && typeof a.isRewardedReady === 'function') {
+            return !!a.isRewardedReady();
         }
         return hasYandex();
     }
 
+    // Banners are deliberately NOT in the JAM contract (game-bridge-contract.md §2), so
+    // they skip the Jam branch entirely and go to whatever layer can actually draw one.
     function showBanner() {
-        if (hasNative() && typeof adapter.showBanner === 'function') {
-            return !!adapter.showBanner();
+        if (hasHub() && typeof hubAdsManager().showBanner === 'function') {
+            try { hubAdsManager().showBanner(); return true; } catch (e) { return false; }
+        }
+        if (hasLocal() && typeof localAdapter().showBanner === 'function') {
+            return !!localAdapter().showBanner();
         }
         if (hasYandex() && typeof window.YandexSDK.showBannerAdv === 'function') {
             window.YandexSDK.showBannerAdv();
@@ -363,8 +487,11 @@
     }
 
     function hideBanner() {
-        if (hasNative() && typeof adapter.hideBanner === 'function') {
-            return !!adapter.hideBanner();
+        if (hasHub() && typeof hubAdsManager().hideBanner === 'function') {
+            try { hubAdsManager().hideBanner(); return true; } catch (e) { return false; }
+        }
+        if (hasLocal() && typeof localAdapter().hideBanner === 'function') {
+            return !!localAdapter().hideBanner();
         }
         if (hasYandex() && typeof window.YandexSDK.hideBannerAdv === 'function') {
             window.YandexSDK.hideBannerAdv();
@@ -374,14 +501,81 @@
     }
 
     function isBannerVisible() {
-        if (hasNative() && typeof adapter.isBannerVisible === 'function') {
-            return !!adapter.isBannerVisible();
+        if (hasHub() && typeof hubAdsManager().isBannerVisible === 'function') {
+            try { return !!hubAdsManager().isBannerVisible(); } catch (e) { return false; }
+        }
+        if (hasLocal() && typeof localAdapter().isBannerVisible === 'function') {
+            return !!localAdapter().isBannerVisible();
         }
         return false;
     }
 
+    // -----------------------------------------------------------------------
+    // 6. Progress + custom events. Only the Jam/RewardHub family has an event sink;
+    //    Yandex keeps its own analytics calls where they were (game.js drives
+    //    dispatchGameStartEvent / dispatchLevelCompleteEvent on Yandex's schedule,
+    //    which is a different contract with different required moments).
+    //
+    //    Event-name rules come from the portal and are enforced server-side:
+    //    [a-z0-9_]{1,64}, never generated dynamically (unique names are capped per
+    //    project), and `level_complete` + anything `ad_*` are reserved — the portal
+    //    mints those itself, including all ad telemetry.
+    // -----------------------------------------------------------------------
+    function eventSink() {
+        const j = jamBridge();
+        if (j && typeof j.logEvent === 'function') return j;
+        const rh = window.RewardHub;
+        return (rh && typeof rh.logEvent === 'function') ? rh : null;
+    }
+
+    function logEvent(name, params) {
+        const sink = eventSink();
+        if (!sink) return false;
+        try {
+            sink.logEvent(name, params);
+            return true;
+        } catch (e) {
+            console.warn('[platform] logEvent failed', e);
+            return false;
+        }
+    }
+
+    function levelComplete(level, params) {
+        const sink = eventSink();
+        if (!sink || typeof sink.levelComplete !== 'function') return false;
+        try {
+            sink.levelComplete(level, params);
+            return true;
+        } catch (e) {
+            console.warn('[platform] levelComplete failed', e);
+            return false;
+        }
+    }
+
+    // Context, for UX decisions and storage namespacing. All three degrade to a
+    // "no host" answer rather than throwing, so game code can call them unguarded.
+    // getUserId() is null on the JAM portal by design — isRewardMode() is the
+    // documented gate for reward mechanics, and it is always false there.
+    function facade() { return jamBridge() || window.RewardHub || null; }
+
+    function getUserId() {
+        const f = facade();
+        try { return (f && f.getUserId) ? (f.getUserId() || null) : null; } catch (e) { return null; }
+    }
+
+    function isRewardMode() {
+        const f = facade();
+        try { return !!(f && f.isRewardMode && f.isRewardMode()); } catch (e) { return false; }
+    }
+
+    function getGameId() {
+        const f = facade();
+        try { return (f && f.getGameId) ? (f.getGameId() || null) : null; } catch (e) { return null; }
+    }
+
     window.GameAds = {
         platform: platform,
+        provider: provider,
         whenYandexReady: function () { return yandexReadyPromise; },
         hasProvider: hasProvider,
         showInterstitial: showInterstitial,
@@ -391,7 +585,12 @@
         showBanner: showBanner,
         hideBanner: hideBanner,
         isBannerVisible: isBannerVisible,
+        levelComplete: levelComplete,
+        logEvent: logEvent,
+        getUserId: getUserId,
+        isRewardMode: isRewardMode,
+        getGameId: getGameId,
     };
 
-    console.log('[platform] GameAds ready (platform=' + platform + ').');
+    console.log('[platform] GameAds ready (platform=' + platform + ', host=' + (hostAtLoad || 'pending') + ').');
 })();

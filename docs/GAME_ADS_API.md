@@ -4,16 +4,41 @@
 `platform.js` — drop it into your game and call `GameAds.*`. No native bridge,
 no Yandex SDK calls, no platform detection in your code.
 
-Three environments work the same way:
+Four environments work the same way:
 
 | Environment | Ads source | What the dev does |
 |---|---|---|
-| Android APK shell (this repo) | AppLovin MAX via native bridge | Nothing — `platform.js` detects it. |
+| **MY.GAMES JAM portal** | Portal-owned mock ad player via `window.Jam` | Nothing — the portal injects `jam-sdk.js` itself. |
+| **rnd-lab APK (R&D build service)** | AppLovin MAX via `window.Jam` → `RewardHub` → `AdsManager` | Nothing — `build_service` injects the SDK trio itself. |
+| Android APK shell (this repo) | AppLovin MAX via the raw native bridge | Nothing — `platform.js` detects it. |
 | Yandex Games / Yandex validator | Yandex Games SDK | Nothing — `platform.js` loads it lazily. |
 | Browser (localhost / 127.0.0.1) | Built-in simulator | Nothing. Tweak `window.__adsSim` from devtools to drive every branch. |
 
 The raw native interface (`window.AdsBridge`) and the simulator's adapter are
 intentionally **not** exposed on `window`. The contract is `GameAds`, period.
+
+### The `window.Jam` host
+
+`window.Jam` is one contract with two implementations — the jam portal's
+`jam-sdk.js` (simulated ads, real event recording) and rnd-lab's `jam-compat.js`
+(a thin adapter onto the real `window.RewardHub`). Spec:
+`jam.my.games/docs/game-bridge-contract.md`. Because the method names and
+callback semantics match what `GameAds` already expects, the same game binary
+plays on the portal and inside an APK.
+
+`Jam` is resolved **before** the raw native bridge on purpose. Both paths end in
+the same AppLovin call, but only the Jam/RewardHub path also carries progress
+events, custom events and ILRD attribution. The raw bridge remains the fallback
+for a shell that ships no SDK.
+
+Two things `Jam` does **not** cover, so they resolve elsewhere:
+
+- **Banners** — not in the JAM contract. `showBanner`/`hideBanner` skip the Jam
+  branch and go to `AdsManager` → raw bridge → Yandex.
+- **Readiness** — no preload query exists, so `isRewardedReady()` /
+  `isInterstitialReady()` answer `true` on a Jam host. A real "no fill" still
+  arrives as `onError({status:'not_ready'})`; the portal's mock even enforces a
+  30 s frequency cap, so handle that path.
 
 ---
 
@@ -26,9 +51,21 @@ intentionally **not** exposed on `window`. The contract is `GameAds`, period.
 
 `platform.js` is a self-contained IIFE. It defines `window.GameAds`
 synchronously and starts loading the Yandex SDK in the background (only when no
-native bridge / simulator is in play). Order matters only if you query
-`GameAds.hasProvider()` during page load on Yandex — wait for
-`GameAds.whenYandexReady()` if you need synchronous certainty there.
+other host was detected — a Jam host, native bridge or simulator all skip it).
+Order matters only if you query `GameAds.hasProvider()` during page load on
+Yandex — wait for `GameAds.whenYandexReady()` if you need synchronous certainty
+there.
+
+You never add a `<script>` tag for the platform SDKs yourself. The jam portal
+inserts `jam-sdk.js` before your first script; rnd-lab's `build_service` inserts
+`ads-bridge.js` → `rewardhub-sdk.js` → `jam-compat.js` before `</head>`, i.e.
+**after** this file. That is why every host is resolved lazily, per call, and not
+at load time — see the implementation notes.
+
+One naming constraint follows from that: do **not** name your own files
+`ads-bridge.js`, `rewardhub-sdk.js` or `jam-compat.js`. The injector skips any
+file a game already ships under those names, and would then leave the build with
+no SDK at all.
 
 ---
 
@@ -66,17 +103,22 @@ if (GameAds.hasProvider()) {
 }
 ```
 
-Returns `true` if a native bridge or Yandex SDK is present. Always `false` on
-plain desktop browser (unless the localhost simulator is active).
+Returns `true` if a Jam host, `AdsManager`, native bridge or Yandex SDK is
+present. Always `false` on plain desktop browser (unless the localhost simulator
+is active).
 
 ---
 
 ## API reference
 
 ### `GameAds.platform: 'native' | 'web'`
-Set once at script load. `'native'` means a native bridge or localhost
-simulator was bound. `'web'` means we're falling back to Yandex SDK (or
-nothing, if Yandex isn't reachable).
+Set once at script load. `'native'` means a raw native bridge or localhost
+simulator was bound. `'web'` means anything else — including a Jam host, since
+that is not known at load time inside an APK. Prefer `provider()`.
+
+### `GameAds.provider(): 'jam' | 'hub' | 'native' | 'sim' | 'yandex' | 'none'`
+Which host would actually serve the next ad, evaluated on read. This is the
+resolution order every `show*` follows.
 
 ### `GameAds.hasProvider(): boolean`
 True if any provider can actually show ads right now.
@@ -141,6 +183,47 @@ Toggle the banner slot off.
 
 ### `GameAds.isBannerVisible(): boolean`
 True if the banner is currently displayed.
+
+---
+
+## Progress and events
+
+Only the Jam/RewardHub family has an event sink. On Yandex and in a plain browser
+both calls are silent no-ops returning `false`, so game code needs no guard.
+Yandex's own analytics (`dispatchGameStartEvent`,
+`dispatchLevelCompleteEvent`) is a separate contract with different required
+moments and stays on direct `window.YandexSDK` calls.
+
+### `GameAds.levelComplete(level, params?): boolean`
+The funnel primitive — how far players get. This game has no levels, so
+`SCORE_MILESTONES` in `game.js` stands in: each threshold reports once per round.
+
+### `GameAds.logEvent(name, params?): boolean`
+Everything else. Rules are enforced server-side by the portal:
+
+- names are `[a-z0-9_]{1,64}`, lowercase (the SDK normalizes and logs a rewrite);
+- **never generate names dynamically** — unique names are capped per project and
+  the overflow is folded into `_other`;
+- `level_complete` and anything starting with `ad_` are **reserved**. The portal
+  mints those itself, all ad telemetry included — don't send your own.
+
+`params` must be JSON-serializable and stays under ~1 KB. There is also a
+per-session event cap, so don't call this from an update loop.
+
+Events this game sends: `game_start`, `game_over`, `second_chance_shown`,
+`second_chance_taken`, `second_chance_declined`.
+
+### `GameAds.getUserId(): string | null`
+Host user id. **`null` on the jam portal by design** — the portal attributes
+events from the session cookie, so the client never needs one. Don't gate reward
+mechanics on it.
+
+### `GameAds.isRewardMode(): boolean`
+The documented gate for reward mechanics. Always `false` on the jam portal, real
+in an APK.
+
+### `GameAds.getGameId(): string | null`
+Project/game id. Useful for namespacing your own `localStorage`.
 
 ---
 
@@ -218,6 +301,7 @@ runs:
 <script>
     window.GameAds = {
         platform: 'web',
+        provider: () => 'jam',
         hasProvider: () => true,
         whenYandexReady: () => Promise.resolve(false),
         showRewarded: (cb) => { cb.onOpen?.(); cb.onReward?.(); cb.onClose?.(true); },
@@ -227,6 +311,11 @@ runs:
         showBanner: () => true,
         hideBanner: () => true,
         isBannerVisible: () => true,
+        levelComplete: (l, p) => { console.log('levelComplete', l, p); return true; },
+        logEvent: (n, p) => { console.log('logEvent', n, p); return true; },
+        getUserId: () => null,
+        isRewardMode: () => false,
+        getGameId: () => 'test',
     };
 </script>
 <script src="your-game.js"></script>
@@ -260,7 +349,24 @@ This section is for whoever builds the APK shell — game developers don't need 
    `evaluateJavascript`.
 2. **Localhost simulator** — runs when no native bridge AND
    `window.location.hostname ∈ {localhost, 127.0.0.1}`.
-3. **Yandex SDK** — lazy-loaded only when neither (1) nor (2) bound.
+3. **Host facades we don't create** — `window.Jam` and `window.AdsManager`,
+   resolved lazily on every call.
+4. **Yandex SDK** — lazy-loaded only when none of the above was detected at load.
+
+### Why the raw native adapter is built lazily
+
+Both our native adapter and rnd-lab's `ads-bridge.js` install
+`window.__adsCallback`, and the injected `ads-bridge.js` tag lands **after** ours
+in the document. Building our adapter at load time would let `ads-bridge.js`
+overwrite the callback: Kotlin would resolve the ad into *their* pending map,
+which never heard of our `callbackId`, and the game would hang forever with no
+`onClose` — the exact freeze the callback contract exists to prevent.
+
+So the raw adapter is constructed on first use, and the resolution order
+(`jam → hub → local → yandex`, short-circuited) guarantees we never reach for it
+while a higher-level facade is present. Result: `window.__adsCallback` has exactly
+one owner in every environment — `ads-bridge.js` when the SDK was injected, us
+when it wasn't.
 
 To embed a new game in this APK shell, the contract on the APK side is:
 

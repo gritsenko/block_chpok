@@ -681,6 +681,11 @@ if (document.readyState === 'complete') {
 
 // --- НАСТРОЙКИ И ДАННЫЕ ---
 const BOARD_SIZE = 8;
+// Прогресс для Jam/RewardHub: уровней в игре нет, поэтому роль ступеней воронки играют
+// пороги счёта — levelComplete это «насколько далеко дошёл игрок» для портала.
+// Список намеренно короткий и статичный: число уникальных имён событий на проект
+// ограничено на сервере, а динамические имена туда лучше не отправлять вообще.
+const SCORE_MILESTONES = [500, 1000, 2500, 5000, 10000, 25000];
 const BEST_SCORE_KEY = 'block-chpok-best-score';
 const SOUND_ENABLED_KEY = 'block-chpok-sound-enabled';
 const LEGACY_MUSIC_ENABLED_KEY = 'block-chpok-music-enabled';
@@ -696,6 +701,12 @@ const I18N = {
         documentTitle: 'Block Chpok',
         ogDescription: 'A playful block puzzle game',
         play: 'Play',
+        modeClassic: 'Classic',
+        modeAdventure: 'Adventure',
+        adventureSub: 'Levels & goals',
+        leaderboardTitle: 'Leaderboard',
+        backToMenu: 'Main menu',
+        levelShort: 'Level',
         gameOverTitle: 'Game Over!',
         scoreLabel: 'Score:',
         scoreLabelShort: 'SCORE:',
@@ -722,6 +733,12 @@ const I18N = {
         documentTitle: 'Block Chpok',
         ogDescription: 'Увлекательная головоломка с блоками',
         play: 'Играть',
+        modeClassic: 'Классика',
+        modeAdventure: 'Приключение',
+        adventureSub: 'Уровни и цели',
+        leaderboardTitle: 'Лидеры',
+        backToMenu: 'В меню',
+        levelShort: 'Уровень',
         gameOverTitle: 'Игра окончена!',
         scoreLabel: 'Счет:',
         scoreLabelShort: 'СЧЁТ:',
@@ -769,7 +786,22 @@ const BLOCK_PALETTES = {
     [COLORS.green]: { base: '#66cc33' },
     [COLORS.purple]: { base: '#b042ff' },
     [COLORS.yellow]: { base: '#ffcc00' },
-    [COLORS.red]: { base: '#f03030' }
+    [COLORS.red]: { base: '#f03030' },
+    // Псевдо-токены препятствий: цвета нужны только системе частиц,
+    // текстур блоков у них нет (рисуются CSS-оверлеями).
+    'obstacle-rock': { base: '#b9b2aa' },
+    'obstacle-crate': { base: '#c98a4b' },
+    'obstacle-bomb': { base: '#ff8a4a' },
+    'obstacle-ice': { base: '#a9e6ff' },
+    'obstacle-gem': { base: '#59e8ff' }
+};
+
+const OBSTACLE_PARTICLE_TOKENS = {
+    rock: 'obstacle-rock',
+    crate: 'obstacle-crate',
+    bomb: 'obstacle-bomb',
+    ice: 'obstacle-ice',
+    gem: 'obstacle-gem'
 };
 
 // URL текстур блоков для PixiJS-рендера — те же PNG, что и в CSS-классах (.block-color-*).
@@ -851,6 +883,62 @@ const SHAPES_DATA = [
     { matrix: [[1], [1], [1]], color: COLORS.orange }  // 3x1
 ];
 
+// --- РЕЖИМЫ ИГРЫ ---
+// 'endless'   — классика: бесконечная партия на рекорд (историческое поведение).
+// 'adventure' — приключение: уровни с целями, лимитом ходов и препятствиями.
+// Ядро (этот файл) ничего не знает про цели и прогресс: оно только отдаёт события
+// в window.Adventure и выполняет команды из window.GameCore. Вся мета-логика
+// приключения живёт в adventure.js, данные уровней — в levels.js.
+const MODE_ENDLESS = 'endless';
+const MODE_ADVENTURE = 'adventure';
+
+// Слой препятствий поверх board. board[r][c] — цвет блока (или null), а
+// obstacles[r][c] — { type, hp } / null. Слои независимы, поэтому старый
+// код, который читает board, продолжает работать без изменений.
+//
+//   void  — дырка в доске: ставить нельзя, в сборке линии НЕ участвует.
+//   rock  — камень: ставить нельзя, для линии считается заполненной, hp сбивается очисткой.
+//   crate — ящик: механика камня + учитывается в цели 'crates'.
+//   bomb  — бомба: механика камня + обратный отсчёт по ходам; 0 => проигрыш.
+//   ice   — лёд: ячейка ПУСТАЯ и доступна для установки, тает при очистке линии.
+//   gem   — кристалл внутри блока: собирается, когда блок сносит линией.
+const OBSTACLE_BLOCKS_PLACEMENT = { void: true, rock: true, crate: true, bomb: true };
+const OBSTACLE_FILLS_LINE = { rock: true, crate: true, bomb: true };
+
+let gameMode = MODE_ENDLESS;
+let obstacles = [];
+let activeShapePool = SHAPES_DATA;
+let pendingLevelSetup = null;
+let isInputLocked = false;
+let isHammerArmed = false;
+
+function createEmptyObstacleGrid() {
+    return Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+}
+
+function getObstacle(r, c) {
+    const row = obstacles[r];
+    return row ? (row[c] || null) : null;
+}
+
+function isAdventureMode() {
+    return gameMode === MODE_ADVENTURE;
+}
+
+// Единая точка вызова хуков приключения. В классике и без adventure.js — no-op,
+// поэтому обёртки на местах вызова не нужны.
+function adventureHook(name, payload) {
+    if (!isAdventureMode() || !window.Adventure) return undefined;
+    const fn = window.Adventure[name];
+    if (typeof fn !== 'function') return undefined;
+    try {
+        return fn(payload);
+    } catch (error) {
+        console.warn(`Adventure hook ${name} failed:`, error);
+        return undefined;
+    }
+}
+
 // --- СОСТОЯНИЕ ИГРЫ ---
 let board = [];
 let trayPieces = [null, null, null];
@@ -895,6 +983,8 @@ let languageReadyPromise = null;
 let hasRequestedYandexGameReady = false;
 let isSplashPlayEnabled = false;
 let hasUsedSecondChance = false;
+let reachedMilestones = 0;
+let bestComboStreak = 0;
 let pendingRewardShapes = null;
 
 // --- INTERSTITIAL (показ полноэкранной рекламы при рестарте) ---
@@ -1016,6 +1106,11 @@ function showComboDisplay(text) {
 }
 
 const splashPlayBtn = document.getElementById('splash-play-btn');
+const splashModesEl = document.getElementById('splash-modes');
+const splashAdventureBtn = document.getElementById('splash-play-adventure');
+const splashLeaderboardBtn = document.getElementById('splash-leaderboard-btn');
+const splashAdventureSubEl = document.getElementById('splash-adventure-sub');
+const splashClassicSubEl = document.getElementById('splash-classic-sub');
 const splashOverlay = document.getElementById('splash-overlay');
 const splashLogoEl = document.getElementById('splash-logo');
 const headerLogoEl = document.getElementById('header-logo');
@@ -1023,6 +1118,8 @@ const settingsBtn = document.getElementById('settings-btn');
 const settingsModal = document.getElementById('settings-modal');
 const settingsTitleEl = document.getElementById('settings-title');
 const settingsCloseBtn = document.getElementById('settings-close-btn');
+const menuBtn = document.getElementById('settings-menu-btn');
+const settingsLeaderboardBtn = document.getElementById('settings-leaderboard-btn');
 const musicToggle = document.getElementById('music-toggle');
 const musicToggleLabelEl = document.getElementById('music-toggle-label');
 const musicToggleStatusEl = document.getElementById('music-toggle-status');
@@ -1086,13 +1183,13 @@ function handlePixiContextRestored() {
 initPixiRenderer();
 
 function updateSplashPlayButtonPosition() {
-    if (!splashPlayBtn || !boardEl) return;
+    if (!splashModesEl || !boardEl) return;
 
     const boardRect = boardEl.getBoundingClientRect();
     if (boardRect.width <= 0 || boardRect.height <= 0) return;
 
-    splashPlayBtn.style.left = `${boardRect.left + boardRect.width / 2}px`;
-    splashPlayBtn.style.top = `${boardRect.top + boardRect.height / 2}px`;
+    splashModesEl.style.left = `${boardRect.left + boardRect.width / 2}px`;
+    splashModesEl.style.top = `${boardRect.top + boardRect.height / 2}px`;
 }
 
 function normalizeLanguage(lang) {
@@ -1179,7 +1276,15 @@ function applyTranslations(language) {
         ogDescriptionMeta.setAttribute('content', messages.ogDescription);
     }
 
-    splashPlayBtn.textContent = messages.play;
+    const classicTitleEl = document.getElementById('splash-classic-title');
+    const adventureTitleEl = document.getElementById('splash-adventure-title');
+    if (classicTitleEl) classicTitleEl.textContent = messages.modeClassic;
+    if (adventureTitleEl) adventureTitleEl.textContent = messages.modeAdventure;
+    if (splashLeaderboardBtn) splashLeaderboardBtn.textContent = messages.leaderboardTitle;
+    if (menuBtn) menuBtn.textContent = messages.backToMenu;
+    if (settingsLeaderboardBtn) settingsLeaderboardBtn.textContent = messages.leaderboardTitle;
+    refreshSplashSubtitles();
+
     gameOverTitleEl.textContent = messages.gameOverTitle;
     gameOverScoreLabelEl.textContent = messages.scoreLabel;
     gameOverBestLabelEl.textContent = messages.bestLabel;
@@ -1200,6 +1305,14 @@ function applyTranslations(language) {
 
     applyLocalizedLogos(currentLanguage);
     syncSoundToggleUI();
+
+    // Приключение и лидерборды держат собственные словари и перерисовывают открытые экраны.
+    if (window.Adventure && typeof window.Adventure.applyLanguage === 'function') {
+        window.Adventure.applyLanguage(currentLanguage);
+    }
+    if (window.GameLeaderboards && typeof window.GameLeaderboards.applyLanguage === 'function') {
+        window.GameLeaderboards.applyLanguage(currentLanguage);
+    }
 
     if (comboStreak >= 2) {
         comboDisplay.textContent = `${messages.comboLabel} x${comboStreak}`;
@@ -1320,7 +1433,9 @@ function shouldGameplayBeActive() {
         && !gameOverScreen.classList.contains('show')
         && !secondChanceModal.classList.contains('show')
         && !isGameOverSequenceActive
-        && !isGameplayPausedBySdk;
+        && !isGameplayPausedBySdk
+        // Приключение блокирует ввод, пока открыты карта/итоги уровня.
+        && !isInputLocked;
 }
 
 function syncGameplayState() {
@@ -1454,13 +1569,58 @@ async function notifyYandexGameReadyForSplash() {
 function setSplashPlayEnabled(enabled) {
     isSplashPlayEnabled = !!enabled;
 
-    if (!splashPlayBtn) {
-        return;
+    if (splashModesEl) {
+        splashModesEl.style.display = isSplashPlayEnabled ? '' : 'none';
+        splashModesEl.setAttribute('aria-hidden', isSplashPlayEnabled ? 'false' : 'true');
     }
 
-    splashPlayBtn.style.display = isSplashPlayEnabled ? '' : 'none';
-    splashPlayBtn.disabled = !isSplashPlayEnabled;
-    splashPlayBtn.setAttribute('aria-hidden', isSplashPlayEnabled ? 'false' : 'true');
+    [splashPlayBtn, splashAdventureBtn, splashLeaderboardBtn].forEach(btn => {
+        if (!btn) return;
+        btn.disabled = !isSplashPlayEnabled;
+    });
+
+    if (isSplashPlayEnabled) {
+        refreshSplashSubtitles();
+        updateSplashPlayButtonPosition();
+    }
+}
+
+// Подписи на кнопках режимов: рекорд классики и текущий прогресс приключения.
+function refreshSplashSubtitles() {
+    const messages = getMessages();
+
+    if (splashClassicSubEl) {
+        splashClassicSubEl.textContent = `${messages.bestLabel} ${formatNumber(bestScore)}`;
+    }
+
+    const summary = (window.Adventure && typeof window.Adventure.getProgressSummary === 'function')
+        ? window.Adventure.getProgressSummary()
+        : null;
+
+    // Нет levels.js/adventure.js — кнопки режима быть не должно, иначе игрок
+    // ткнёт в неё и попадёт в классику без объяснений.
+    if (splashAdventureBtn) {
+        splashAdventureBtn.hidden = !summary;
+    }
+
+    if (splashAdventureSubEl) {
+        splashAdventureSubEl.textContent = summary
+            ? `${messages.levelShort} ${summary.currentLevel} · ★ ${summary.totalStars}`
+            : messages.adventureSub;
+    }
+
+    if (splashLeaderboardBtn) {
+        const canShowLeaderboard = !!(window.GameLeaderboards && window.GameLeaderboards.isAvailable());
+        splashLeaderboardBtn.hidden = !canShowLeaderboard;
+    }
+}
+
+function setInputLocked(locked) {
+    isInputLocked = !!locked;
+    if (isInputLocked && isDragging) {
+        cancelDrag();
+    }
+    syncGameplayState();
 }
 
 async function prepareSplashPlayForYandex() {
@@ -1569,17 +1729,20 @@ function saveBestScore(nextBestScore) {
     }
     updateBestScoreDisplay();
 
-    // Синхронизируем с Yandex SDK
+    // Статистика игрока остаётся на Yandex SDK, а лидерборд идёт через фасад
+    // GameLeaderboards (Yandex сейчас, jam-sdk — когда добавят методы).
     if (window.YandexSDK && window.YandexSDK.isAvailable()) {
         window.YandexSDK.saveBestScore(bestScore);
-        if (!window.YandexSDK.isMethodAvailable || window.YandexSDK.isMethodAvailable('leaderboards.setScore')) {
-            window.YandexSDK.setLeaderboardScore(bestScore);
-        }
+    }
+
+    if (window.GameLeaderboards) {
+        window.GameLeaderboards.submit('endless', bestScore);
     }
 }
 
 function updateBestScoreDisplay() {
-    const formattedBestScore = formatNumber(Math.max(bestScore, score));
+    // В приключении счёт партии не является рекордом классики — показываем только bestScore.
+    const formattedBestScore = formatNumber(isAdventureMode() ? bestScore : Math.max(bestScore, score));
     if (bestScoreEl) {
         bestScoreEl.textContent = formattedBestScore;
     }
@@ -1597,6 +1760,12 @@ function isThreeByThreeSquare(shape) {
 }
 
 function finalizeBestScore() {
+    // Рекорд — метрика классики; очки уровня приключения в него не попадают.
+    if (isAdventureMode()) {
+        updateBestScoreDisplay();
+        return;
+    }
+
     if (score > bestScore) {
         saveBestScore(score);
     } else {
@@ -1609,9 +1778,23 @@ function revealGameOverScreen() {
     isGameOverSequenceActive = false;
     syncGameplayState();
 
+    // Единственное место, где партия действительно заканчивается — сюда приходят и
+    // обычный game over, и отказ от второго шанса.
+    trackEvent('game_over', {
+        score: score,
+        best: bestScore,
+        combo: bestComboStreak,
+        second_chance: hasUsedSecondChance ? 1 : 0,
+    });
+
     if (window.YandexSDK && window.YandexSDK.isAvailable()) {
         window.YandexSDK.dispatchLevelCompleteEvent(1);
     }
+}
+
+function randomPoolShape() {
+    const pool = activeShapePool.length > 0 ? activeShapePool : SHAPES_DATA;
+    return cloneShape(pool[Math.floor(Math.random() * pool.length)]);
 }
 
 function generateRewardShapes() {
@@ -1621,9 +1804,9 @@ function generateRewardShapes() {
     const possibleShapes = getAllPossibleShapes();
     for (let i = 0; i < 2; i++) {
         if (possibleShapes.length > i) {
-            newShapes.push(cloneShape(SHAPES_DATA[possibleShapes[i]]));
+            newShapes.push(cloneShape(activeShapePool[possibleShapes[i]]));
         } else {
-            newShapes.push(cloneShape(SHAPES_DATA[Math.floor(Math.random() * SHAPES_DATA.length)]));
+            newShapes.push(randomPoolShape());
         }
     }
 
@@ -1674,6 +1857,7 @@ function showSecondChance() {
     }
 
     isGameOverSequenceActive = true;
+    trackEvent('second_chance_shown', { score: score });
     haptic.error();
     setCharacterState('sad');
     gameContainer.classList.add('game-over-transition');
@@ -1733,6 +1917,39 @@ function getCurrentCellSize() {
     return nextCellSize;
 }
 
+// Раскладывает подготовленный уровень (или чистую доску классики) в игровые сетки.
+// setup приходит из adventure.js: { colors, obstacles, shapePool } — уже разобранный
+// layout, чтобы ядро не зависело от формата данных уровней.
+function applyLevelSetup(setup) {
+    board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+    obstacles = createEmptyObstacleGrid();
+    activeShapePool = SHAPES_DATA;
+
+    if (!setup) return;
+
+    if (Array.isArray(setup.colors)) {
+        for (let r = 0; r < BOARD_SIZE; r++) {
+            for (let c = 0; c < BOARD_SIZE; c++) {
+                const color = setup.colors[r] ? setup.colors[r][c] : null;
+                if (color) board[r][c] = color;
+            }
+        }
+    }
+
+    if (Array.isArray(setup.obstacles)) {
+        for (let r = 0; r < BOARD_SIZE; r++) {
+            for (let c = 0; c < BOARD_SIZE; c++) {
+                const cell = setup.obstacles[r] ? setup.obstacles[r][c] : null;
+                if (cell) obstacles[r][c] = { type: cell.type, hp: cell.hp, turns: cell.turns };
+            }
+        }
+    }
+
+    if (Array.isArray(setup.shapePool) && setup.shapePool.length > 0) {
+        activeShapePool = setup.shapePool;
+    }
+}
+
 function initGame() {
     clearPendingRefill();
     clearPendingGameOver();
@@ -1743,7 +1960,9 @@ function initGame() {
     gameContainer.classList.remove('game-over-transition');
     setCharacterState('base');
     closeSettingsModal();
-    board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+    setHammerArmed(false);
+    applyLevelSetup(pendingLevelSetup);
+    pendingLevelSetup = null;
     trayPieces = [null, null, null];
     score = 0;
     displayedScore = 0;
@@ -1752,13 +1971,18 @@ function initGame() {
     dragPieceIndex = -1;
     dragPointerType = 'mouse';
     comboStreak = 0;
+    bestComboStreak = 0;
     hasUsedSecondChance = false;
+    reachedMilestones = 0;
     sessionStartedAtMs = Date.now();
     updateScore();
     gameOverScreen.classList.remove('show');
     secondChanceModal.classList.remove('show');
     isGameOverSequenceActive = false;
     hideComboDisplay();
+    if (document.body) {
+        document.body.classList.toggle('mode-adventure', isAdventureMode());
+    }
     boardEl.innerHTML = '';
     renderBoard();
     fillTray();
@@ -1785,6 +2009,8 @@ function ensureBoardCells() {
 }
 
 // Снимает DOM-блоки/превью с ячеек (при переключении pixi<->dom, чтобы не дублировать с канвасом).
+// Оверлеи препятствий (.cell-overlay) живут в тех же ячейках, но принадлежат обоим режимам —
+// поэтому удаляем адресно только блоки, а не весь innerHTML.
 function clearDomBoardBlocks() {
     for (let r = 0; r < BOARD_SIZE; r++) {
         const row = cellRefs[r];
@@ -1792,7 +2018,7 @@ function clearDomBoardBlocks() {
         for (let c = 0; c < BOARD_SIZE; c++) {
             const cell = row[c];
             if (!cell) continue;
-            if (cell.firstChild) cell.innerHTML = '';
+            removeCellBlockElements(cell);
             cell.dataset.color = '';
             cell.style.backgroundColor = '';
             cell.classList.remove('preview', 'line-highlight');
@@ -1801,6 +2027,13 @@ function clearDomBoardBlocks() {
     previewCells.clear();
     lineHighlightCells.clear();
     boardHasDomBlocks = false;
+}
+
+function removeCellBlockElements(cell) {
+    const blocks = cell.querySelectorAll('.block-item');
+    for (let i = 0; i < blocks.length; i++) {
+        blocks[i].remove();
+    }
 }
 
 function renderBoard() {
@@ -1813,6 +2046,7 @@ function renderBoard() {
             clearDomBoardBlocks();
         }
         window.pixiRenderer.syncBoard();
+        renderObstacles();
         return;
     }
 
@@ -1823,13 +2057,13 @@ function renderBoard() {
             const currentColor = cell.dataset.color || null;
             const targetColor = board[r][c];
 
-            const hasChild = cell.children.length > 0;
+            const hasChild = cell.querySelector('.block-item') !== null;
             const shouldHaveChild = targetColor !== null;
             const logicalStateMatch = currentColor === targetColor;
             const domStateMatch = hasChild === shouldHaveChild;
 
             if (!logicalStateMatch || !domStateMatch) {
-                cell.innerHTML = '';
+                removeCellBlockElements(cell);
                 if (targetColor) {
                     const block = createBlockElement(targetColor);
                     cell.appendChild(block);
@@ -1839,6 +2073,49 @@ function renderBoard() {
         }
     }
     boardHasDomBlocks = true;
+    renderObstacles();
+}
+
+// Препятствия рисуются DOM-оверлеями внутри .cell в ОБОИХ режимах рендера: они не
+// зависят от текстур и одинаково видны над WebGL-канвасом (z-index задан в styles.css).
+// Дифф по dataset.obstacle, поэтому пересборка DOM происходит только при смене состояния.
+function renderObstacles() {
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        const row = cellRefs[r];
+        if (!row) continue;
+
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            const cell = row[c];
+            if (!cell) continue;
+
+            const obstacle = getObstacle(r, c);
+            const signature = obstacle
+                ? `${obstacle.type}:${obstacle.hp || 0}:${obstacle.turns || 0}`
+                : '';
+
+            if (cell.dataset.obstacle === signature) continue;
+            cell.dataset.obstacle = signature;
+
+            const existing = cell.querySelector('.cell-overlay');
+            if (existing) existing.remove();
+            cell.classList.toggle('cell-void', !!obstacle && obstacle.type === 'void');
+
+            if (!obstacle || obstacle.type === 'void') continue;
+
+            const overlay = document.createElement('div');
+            overlay.className = `cell-overlay cell-overlay-${obstacle.type}`;
+
+            if (obstacle.type === 'bomb') {
+                overlay.dataset.turns = String(obstacle.turns);
+                overlay.textContent = String(obstacle.turns);
+                overlay.classList.toggle('cell-overlay-urgent', obstacle.turns <= 2);
+            } else if (obstacle.hp > 1) {
+                overlay.classList.add(`cell-overlay-hp${Math.min(3, obstacle.hp)}`);
+            }
+
+            cell.appendChild(overlay);
+        }
+    }
 }
 
 function createShapeHTML(shape, withPop = true) {
@@ -1861,11 +2138,13 @@ function createShapeHTML(shape, withPop = true) {
     return html;
 }
 
+// Индексы всегда указывают в activeShapePool (в классике это SHAPES_DATA,
+// в приключении — отфильтрованный набор уровня).
 function getAllPossibleShapes() {
     const possibleShapes = [];
 
-    for (let s = 0; s < SHAPES_DATA.length; s++) {
-        const shape = SHAPES_DATA[s];
+    for (let s = 0; s < activeShapePool.length; s++) {
+        const shape = activeShapePool[s];
         let canPlaceShape = false;
         let placementCount = 0; // Количество возможных мест для размещения
 
@@ -1915,6 +2194,10 @@ function canPlaceAllShapesInOrder(shapeList) {
                     if (boardR < 0 || boardR >= BOARD_SIZE || boardC < 0 || boardC >= BOARD_SIZE || tempBoard[boardR][boardC] !== null) {
                         return false;
                     }
+                    const obstacle = getObstacle(boardR, boardC);
+                    if (obstacle && OBSTACLE_BLOCKS_PLACEMENT[obstacle.type]) {
+                        return false;
+                    }
                 }
             }
         }
@@ -1934,7 +2217,7 @@ function canPlaceAllShapesInOrder(shapeList) {
 
     // Пробуем разместить все фигуры из списка
     for (const shapeIndex of shapeList) {
-        const shape = SHAPES_DATA[shapeIndex];
+        const shape = activeShapePool[shapeIndex];
         let placed = false;
 
         // Ищем позицию для размещения фигуры
@@ -1956,6 +2239,57 @@ function canPlaceAllShapesInOrder(shapeList) {
     }
 
     return true;
+}
+
+// Единая проверка «линия собрана» для реальной доски и для симуляции превью.
+// Правила приключения:
+//   • 'void' в сборке линии не участвует (линия из 6 клеток вместо 8);
+//   • камни/ящики/бомбы считаются заполненными — они СОКРАЩАЮТ работу игроку;
+//   • линия сбрасывается только если в ней есть хотя бы один цветной блок,
+//     иначе ряд из одних камней «очищался» бы сам собой на каждом ходу.
+function collectFullLines(readColor) {
+    const rows = [];
+    const cols = [];
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        let isFull = true;
+        let hasColor = false;
+
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            const obstacle = getObstacle(r, c);
+            if (obstacle && obstacle.type === 'void') continue;
+            if (readColor(r, c) !== null) {
+                hasColor = true;
+                continue;
+            }
+            if (obstacle && OBSTACLE_FILLS_LINE[obstacle.type]) continue;
+            isFull = false;
+            break;
+        }
+
+        if (isFull && hasColor) rows.push(r);
+    }
+
+    for (let c = 0; c < BOARD_SIZE; c++) {
+        let isFull = true;
+        let hasColor = false;
+
+        for (let r = 0; r < BOARD_SIZE; r++) {
+            const obstacle = getObstacle(r, c);
+            if (obstacle && obstacle.type === 'void') continue;
+            if (readColor(r, c) !== null) {
+                hasColor = true;
+                continue;
+            }
+            if (obstacle && OBSTACLE_FILLS_LINE[obstacle.type]) continue;
+            isFull = false;
+            break;
+        }
+
+        if (isFull && hasColor) cols.push(c);
+    }
+
+    return { rows: rows, cols: cols };
 }
 
 function wouldCreateLineClear(shape, startR, startC) {
@@ -1980,39 +2314,7 @@ function wouldCreateLineClear(shape, startR, startC) {
         }
     }
 
-    // Check which rows and columns would be filled completely
-    const rowsToClear = [];
-    const colsToClear = [];
-
-    // Check rows
-    for (let r = 0; r < BOARD_SIZE; r++) {
-        let isRowFull = true;
-        for (let c = 0; c < BOARD_SIZE; c++) {
-            if (tempBoard[r][c] === null) {
-                isRowFull = false;
-                break;
-            }
-        }
-        if (isRowFull) {
-            rowsToClear.push(r);
-        }
-    }
-
-    // Check columns
-    for (let c = 0; c < BOARD_SIZE; c++) {
-        let isColFull = true;
-        for (let r = 0; r < BOARD_SIZE; r++) {
-            if (tempBoard[r][c] === null) {
-                isColFull = false;
-                break;
-            }
-        }
-        if (isColFull) {
-            colsToClear.push(c);
-        }
-    }
-
-    return { rows: rowsToClear, cols: colsToClear };
+    return collectFullLines((r, c) => tempBoard[r][c]);
 }
 
 function fillTray() {
@@ -2061,7 +2363,7 @@ function fillTray() {
 
                     // Проверяем, можно ли разместить все 3 выбранные фигуры
                     if (tempSelected.length === 3 && canPlaceAllShapesInOrder(tempSelected)) {
-                        selectedShapes = tempSelected.map(idx => cloneShape(SHAPES_DATA[idx]));
+                        selectedShapes = tempSelected.map(idx => cloneShape(activeShapePool[idx]));
                         foundValidCombination = true;
                     }
                 }
@@ -2105,7 +2407,7 @@ function fillTray() {
 
                     // Проверяем, можно ли разместить эти фигуры
                     if (canPlaceAllShapesInOrder(tempSelected)) {
-                        selectedShapes = tempSelected.map(idx => cloneShape(SHAPES_DATA[idx]));
+                        selectedShapes = tempSelected.map(idx => cloneShape(activeShapePool[idx]));
                     } else {
                         // Если нельзя разместить, берем три разные фигуры без проверки размещения
                         const differentShapes = [];
@@ -2115,7 +2417,7 @@ function fillTray() {
                             if (differentShapes.length >= 3) break;
 
                             // Проверяем, является ли фигура уникальной (на основе матрицы)
-                            const shapeMatrixKey = JSON.stringify(SHAPES_DATA[idx].matrix);
+                            const shapeMatrixKey = JSON.stringify(activeShapePool[idx].matrix);
                             if (!usedShapes.has(shapeMatrixKey)) {
                                 differentShapes.push(idx);
                                 usedShapes.add(shapeMatrixKey);
@@ -2130,21 +2432,21 @@ function fillTray() {
                             }
                         }
 
-                        selectedShapes = differentShapes.slice(0, 3).map(idx => cloneShape(SHAPES_DATA[idx]));
+                        selectedShapes = differentShapes.slice(0, 3).map(idx => cloneShape(activeShapePool[idx]));
                     }
                 }
 
                 // Если и это не помогло, просто берём первые 3 возможные фигуры
                 if (selectedShapes.length === 0 && possibleShapeIndices.length > 0) {
                     const limitedIndices = possibleShapeIndices.slice(0, 3);
-                    selectedShapes = limitedIndices.map(idx => cloneShape(SHAPES_DATA[idx]));
+                    selectedShapes = limitedIndices.map(idx => cloneShape(activeShapePool[idx]));
                 }
             }
 
             // Заполняем трей фигурами
             for (let i = 0; i < 3; i++) {
                 // Если смогли подобрать подходящие фигуры, используем их, иначе берем случайную
-                const randomShape = selectedShapes[i] || cloneShape(SHAPES_DATA[Math.floor(Math.random() * SHAPES_DATA.length)]);
+                const randomShape = selectedShapes[i] || randomPoolShape();
 
                 const slotFillTimeoutId = setTimeout(async () => {
                     await waitForGameplayResume();
@@ -2226,6 +2528,9 @@ function renderTray(forceEmpty = false, popIndexes = null) {
 
 function startDrag(e, index) {
     if (!trayPieces[index] || isDragging || isAnimating || !canInteractWithGameplay()) return;
+    // Пока молоток «в руке», трей не перетаскивается — иначе тап по фигуре и тап по
+    // доске конфликтуют, и игрок тратит бустер вслепую.
+    if (isHammerArmed) return;
 
     e.preventDefault();
 
@@ -2598,10 +2903,21 @@ async function endDrag(e) {
         }
 
         traySlots[savedDragPieceIndex].innerHTML = '';
-        await checkLines(blocksPlaced);
+        const clearResult = await checkLines(blocksPlaced);
+        const explodedBombs = tickBombCountdowns();
         if (currentCharacterState === 'wait') {
             setCharacterState('base');
         }
+        // Хук приключения вызывается ОДИН раз за ход и уже после разбора линий,
+        // поэтому adventure.js видит финальное состояние доски.
+        adventureHook('onPlacement', {
+            blocksPlaced: blocksPlaced,
+            lines: clearResult.lines,
+            combo: clearResult.combo,
+            collected: clearResult.tally,
+            score: score,
+            explodedBombs: explodedBombs
+        });
         renderTray();
         fillTray();
     } else {
@@ -2669,6 +2985,8 @@ function refreshLayoutMetrics() {
 }
 
 function canPlace(shape, startR, startC) {
+    if (!shape || !shape.matrix) return false;
+
     for (let r = 0; r < shape.matrix.length; r++) {
         for (let c = 0; c < shape.matrix[0].length; c++) {
             if (shape.matrix[r][c]) {
@@ -2678,6 +2996,10 @@ function canPlace(shape, startR, startC) {
                     return false;
                 }
                 if (board[boardR][boardC] !== null) {
+                    return false;
+                }
+                const obstacle = getObstacle(boardR, boardC);
+                if (obstacle && OBSTACLE_BLOCKS_PLACEMENT[obstacle.type]) {
                     return false;
                 }
             }
@@ -2702,26 +3024,64 @@ function placeShape(shape, startR, startC) {
     return blocksPlaced;
 }
 
-async function checkLines(blocksPlaced) {
-    const rowsToClear = [];
-    const colsToClear = [];
+function createCollectedTally() {
+    return { blocks: 0, crates: 0, rocks: 0, ice: 0, gems: 0, bombs: 0, colors: {} };
+}
 
-    for (let r = 0; r < BOARD_SIZE; r++) {
-        if (board[r].every(cell => cell !== null)) {
-            rowsToClear.push(r);
-        }
-    }
+// Разбирает одну ячейку сброшенной линии: цветной блок исчезает, препятствия
+// получают урон. Все снятые цели складываются в tally для хука приключения.
+function resolveClearedCell(r, c, tally) {
+    const obstacle = getObstacle(r, c);
+    const color = board[r][c];
 
-    for (let c = 0; c < BOARD_SIZE; c++) {
-        let colFull = true;
-        for (let r = 0; r < BOARD_SIZE; r++) {
-            if (board[r][c] === null) {
-                colFull = false;
-                break;
+    if (color !== null) {
+        board[r][c] = null;
+        tally.blocks += 1;
+        tally.colors[color] = (tally.colors[color] || 0) + 1;
+
+        if (obstacle && obstacle.type === 'gem') {
+            obstacles[r][c] = null;
+            tally.gems += 1;
+        } else if (obstacle && obstacle.type === 'ice') {
+            obstacle.hp -= 1;
+            if (obstacle.hp <= 0) {
+                obstacles[r][c] = null;
+                tally.ice += 1;
             }
         }
-        if (colFull) colsToClear.push(c);
+        return;
     }
+
+    if (!obstacle) return;
+
+    if (obstacle.type === 'rock' || obstacle.type === 'crate') {
+        obstacle.hp -= 1;
+        if (obstacle.hp <= 0) {
+            obstacles[r][c] = null;
+            if (obstacle.type === 'crate') tally.crates += 1;
+            else tally.rocks += 1;
+        }
+    } else if (obstacle.type === 'bomb') {
+        // Линия прошла через бомбу — обезвредили.
+        obstacles[r][c] = null;
+        tally.bombs += 1;
+    }
+}
+
+// Цвет частиц для ячейки: у цветного блока — его палитра, у препятствия — своя.
+function getClearParticleColor(r, c) {
+    const color = board[r][c];
+    if (color) return color;
+
+    const obstacle = getObstacle(r, c);
+    if (!obstacle) return COLORS.purple;
+
+    return OBSTACLE_PARTICLE_TOKENS[obstacle.type] || COLORS.purple;
+}
+
+async function checkLines(blocksPlaced) {
+    const tally = createCollectedTally();
+    const { rows: rowsToClear, cols: colsToClear } = collectFullLines((r, c) => board[r][c]);
 
     const linesToClear = [];
     rowsToClear.forEach(r => {
@@ -2738,6 +3098,9 @@ async function checkLines(blocksPlaced) {
     const totalLines = linesToClear.length;
     if (totalLines > 0) {
         comboStreak += 1;
+        if (comboStreak > bestComboStreak) {
+            bestComboStreak = comboStreak;
+        }
     } else {
         comboStreak = 0;
     }
@@ -2806,6 +3169,10 @@ async function checkLines(blocksPlaced) {
             const coordsArray = Array.from(cellsToClear).map(coord => {
                 const [r, c] = coord.split(',').map(Number);
                 return { coord, r, c };
+            }).filter(item => {
+                // Дырки в доске не сносятся и не дают частиц.
+                const obstacle = getObstacle(item.r, item.c);
+                return !obstacle || obstacle.type !== 'void';
             });
 
             if (lastPlacementCoords) {
@@ -2821,28 +3188,38 @@ async function checkLines(blocksPlaced) {
 
             // Последовательное исчезновение: от ближайших к последней установке к дальним
             for (const item of coordsArray) {
-                const [r, c] = item.coord.split(',').map(Number);
+                const r = item.r;
+                const c = item.c;
                 const cell = getCell(r, c);
-                if (cell) {
-                    const colorStr = board[r][c];
-                    const rect = cell.getBoundingClientRect();
-                    createParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, colorStr, 14);
+                const hadObstacle = getObstacle(r, c) !== null;
 
-                    if (usePixi()) {
-                        // GPU-анимация сжигания блока (scale->0 + fade) вместо CSS @keyframes blast.
-                        window.pixiRenderer.blastCell(r, c);
-                    } else {
-                        const blockEl = cell.querySelector('.block-item');
-                        if (blockEl) {
-                            blockEl.classList.add('clearing');
+                if (cell) {
+                    const rect = cell.getBoundingClientRect();
+                    createParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, getClearParticleColor(r, c), 14);
+
+                    if (board[r][c] !== null) {
+                        if (usePixi()) {
+                            // GPU-анимация сжигания блока (scale->0 + fade) вместо CSS @keyframes blast.
+                            window.pixiRenderer.blastCell(r, c);
+                        } else {
+                            const blockEl = cell.querySelector('.block-item');
+                            if (blockEl) {
+                                blockEl.classList.add('clearing');
+                            }
                         }
+                    } else if (hadObstacle) {
+                        cell.classList.add('cell-hit');
+                        setTimeout(() => cell.classList.remove('cell-hit'), 260);
                     }
                 }
 
                 await waitForGameplayResume();
                 await new Promise(resolve => setTimeout(resolve, 45));
 
-                board[r][c] = null;
+                resolveClearedCell(r, c, tally);
+                if (hadObstacle) {
+                    renderObstacles();
+                }
                 if (cell) {
                     const blockEl = cell.querySelector('.block-item');
                     if (blockEl) {
@@ -2863,7 +3240,159 @@ async function checkLines(blocksPlaced) {
     }
 
     lastPlacementCoords = null;
-    return totalLines;
+    return { lines: totalLines, combo: comboStreak, tally: tally };
+}
+
+// Обратный отсчёт бомб тикает РОВНО один раз за установленную фигуру и уже после
+// разбора линий: бомба, снесённая этим же ходом, обезврежена и в отсчёт не попадает.
+// Возвращает список рванувших бомб — решение о проигрыше принимает adventure.js.
+function tickBombCountdowns() {
+    if (!isAdventureMode()) return [];
+
+    const exploded = [];
+    let hasBombs = false;
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            const obstacle = getObstacle(r, c);
+            if (!obstacle || obstacle.type !== 'bomb') continue;
+
+            hasBombs = true;
+            obstacle.turns -= 1;
+            if (obstacle.turns <= 0) {
+                exploded.push({ r: r, c: c });
+            }
+        }
+    }
+
+    if (hasBombs) {
+        renderObstacles();
+    }
+
+    if (exploded.length > 0) {
+        exploded.forEach(({ r, c }) => {
+            const cell = getCell(r, c);
+            if (!cell) return;
+            const rect = cell.getBoundingClientRect();
+            createParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, 'obstacle-bomb', 20, 14);
+        });
+        playSound('hardPop');
+        haptic.error();
+    }
+
+    return exploded;
+}
+
+// --- БУСТЕРЫ (команды из adventure.js) ---
+
+function setHammerArmed(armed) {
+    isHammerArmed = !!armed && isAdventureMode();
+    if (document.body) {
+        document.body.classList.toggle('hammer-armed', isHammerArmed);
+    }
+    return isHammerArmed;
+}
+
+// Молоток: точечно уничтожает содержимое одной ячейки. Препятствие снимается целиком
+// (независимо от hp) — это и есть ценность бустера. Возвращает tally или null.
+function hammerCell(r, c) {
+    if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) return null;
+
+    const obstacle = getObstacle(r, c);
+    const color = board[r][c];
+
+    if (!color && (!obstacle || obstacle.type === 'void')) return null;
+
+    const tally = createCollectedTally();
+    const cell = getCell(r, c);
+
+    if (cell) {
+        const rect = cell.getBoundingClientRect();
+        createParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, getClearParticleColor(r, c), 16, 10);
+    }
+
+    if (color !== null) {
+        board[r][c] = null;
+        tally.blocks += 1;
+        tally.colors[color] = (tally.colors[color] || 0) + 1;
+        if (usePixi()) {
+            window.pixiRenderer.blastCell(r, c);
+        }
+    }
+
+    if (obstacle) {
+        obstacles[r][c] = null;
+        if (obstacle.type === 'crate') tally.crates += 1;
+        else if (obstacle.type === 'rock') tally.rocks += 1;
+        else if (obstacle.type === 'ice') tally.ice += 1;
+        else if (obstacle.type === 'bomb') tally.bombs += 1;
+        else if (obstacle.type === 'gem') tally.gems += 1;
+    }
+
+    playSound('hardPop');
+    haptic.confirm();
+    renderBoard();
+    return tally;
+}
+
+// Сброс таймеров бомб (rewarded «дать ещё времени»): поднимаем отсчёт до n там,
+// где осталось меньше. Сами бомбы остаются на доске — цель уровня не обесценивается.
+function addBombTurns(turns) {
+    let touched = 0;
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            const obstacle = getObstacle(r, c);
+            if (!obstacle || obstacle.type !== 'bomb') continue;
+            if (obstacle.turns < turns) {
+                obstacle.turns = turns;
+                touched += 1;
+            }
+        }
+    }
+
+    if (touched > 0) renderObstacles();
+    return touched;
+}
+
+// Перемешать трей: сбрасываем все три слота и запускаем обычный анимированный добор.
+function reshuffleTray() {
+    if (isAnimating) return false;
+    clearPendingRefill();
+    trayPieces = [null, null, null];
+    playSound('click');
+    fillTray();
+    return true;
+}
+
+// Сколько целей ещё осталось на доске — нужно для целей вида 'all'.
+function countRemainingTargets() {
+    const counts = { crate: 0, ice: 0, gem: 0, bomb: 0, rock: 0 };
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+            const obstacle = getObstacle(r, c);
+            if (obstacle && counts[obstacle.type] !== undefined) {
+                counts[obstacle.type] += 1;
+            }
+        }
+    }
+
+    return counts;
+}
+
+function hasAnyValidMove() {
+    for (let i = 0; i < trayPieces.length; i++) {
+        const piece = trayPieces[i];
+        if (!piece) continue;
+
+        for (let r = 0; r < BOARD_SIZE; r++) {
+            for (let c = 0; c < BOARD_SIZE; c++) {
+                if (canPlace(piece, r, c)) return true;
+            }
+        }
+    }
+    return false;
 }
 
 function createScorePopup(x, y, text) {
@@ -2896,7 +3425,33 @@ function createLandingParticles(x, y, colorStr, particleType = 'landing') {
     particleSystem.createLandingParticles(x, y, colorStr, particleType);
 }
 
+// Единая точка отправки игровых событий. Отвечает только тот хост, у которого есть
+// приёмник (window.Jam на портале JAM / RewardHub в APK) — на Яндексе и в браузере
+// вызов молча ничего не делает, поэтому обёртки на местах вызова не нужны.
+function trackEvent(name, params) {
+    if (window.GameAds && typeof window.GameAds.logEvent === 'function') {
+        window.GameAds.logEvent(name, params);
+    }
+}
+
+// Пороги счёта → levelComplete. Каждый порог отправляется не больше одного раза за партию;
+// счётчик сбрасывается в initGame вместе с остальным состоянием сессии.
+function reportScoreMilestones() {
+    while (reachedMilestones < SCORE_MILESTONES.length && score >= SCORE_MILESTONES[reachedMilestones]) {
+        reachedMilestones++;
+        if (window.GameAds && typeof window.GameAds.levelComplete === 'function') {
+            window.GameAds.levelComplete(reachedMilestones, { score: score });
+        }
+    }
+}
+
 function updateScore() {
+    // Вехи счёта — воронка КЛАССИКИ. В приключении прогресс измеряется уровнями,
+    // и levelComplete отправляет adventure.js по факту прохождения.
+    if (!isAdventureMode()) {
+        reportScoreMilestones();
+    }
+    adventureHook('onScoreChanged', score);
     scoreEl.textContent = formatNumber(score);
 
     const duration = SCORE_ANIMATION_DURATION_MS;
@@ -2941,19 +3496,26 @@ function checkGameOver() {
         return;
     }
 
+    // Приключение уже показывает итоги уровня — не мешаем своим тупиком.
+    if (isInputLocked) {
+        return;
+    }
+
     clearPendingGameOver();
 
-    for (let i = 0; i < 3; i++) {
-        const piece = trayPieces[i];
-        if (!piece) continue;
+    if (hasAnyValidMove()) {
+        return;
+    }
 
-        for (let r = 0; r < BOARD_SIZE; r++) {
-            for (let c = 0; c < BOARD_SIZE; c++) {
-                if (canPlace(piece, r, c)) {
-                    return;
-                }
-            }
-        }
+    // В приключении тупик — это не конец партии, а провал уровня: решение
+    // (реклама за перемешивание, повтор, выход на карту) принимает adventure.js.
+    if (isAdventureMode()) {
+        gameOverTimeoutId = setTimeout(async () => {
+            await waitForGameplayResume();
+            adventureHook('onDeadlock');
+            gameOverTimeoutId = null;
+        }, 450);
+        return;
     }
 
     gameOverTimeoutId = setTimeout(async () => {
@@ -2992,8 +3554,8 @@ async function syncBestScoreWithYandex() {
                 updateBestScoreDisplay();
             } else if (currentLocal > (yaScore || 0)) {
                 window.YandexSDK.saveBestScore(currentLocal);
-                if (!window.YandexSDK.isMethodAvailable || window.YandexSDK.isMethodAvailable('leaderboards.setScore')) {
-                    window.YandexSDK.setLeaderboardScore(currentLocal);
+                if (window.GameLeaderboards) {
+                    window.GameLeaderboards.submit('endless', currentLocal);
                 }
             }
         } catch (e) {
@@ -3008,10 +3570,20 @@ function handleGlobalKeydown(event) {
     }
 }
 
-async function startGame() {
+// Единая точка запуска партии для обоих режимов.
+//   options.mode  — 'endless' | 'adventure' (по умолчанию классика)
+//   options.level — подготовленный setup уровня из adventure.js
+async function startGame(options) {
+    const opts = options || {};
+    const nextMode = opts.mode === MODE_ADVENTURE ? MODE_ADVENTURE : MODE_ENDLESS;
+
     splashOverlay.classList.add('hidden');
     closeSettingsModal();
+    setInputLocked(false);
+    gameMode = nextMode;
+    pendingLevelSetup = opts.level || null;
     hasGameStarted = true;
+    trackEvent('game_start', { best: bestScore, mode: nextMode });
     audioManager.beginGameSession().catch(() => { });
     haptic.confirm();
     // Дожидаемся готовности Pixi (init стартовал ещё на загрузке — обычно уже резолвнут),
@@ -3037,25 +3609,76 @@ async function startGame() {
             }, 1000);
         }
 
-        // Синхронизируем рекорды с небольшой задержкой, чтобы SDK точно успело загрузить данные
-        setTimeout(syncBestScoreWithYandex, 500);
-        // Запросим еще раз чуть позже на случай долгой инициализации SDK
-        setTimeout(syncBestScoreWithYandex, 2500);
+        if (nextMode === MODE_ENDLESS) {
+            // Синхронизируем рекорды с небольшой задержкой, чтобы SDK точно успело загрузить данные
+            setTimeout(syncBestScoreWithYandex, 500);
+            // Запросим еще раз чуть позже на случай долгой инициализации SDK
+            setTimeout(syncBestScoreWithYandex, 2500);
+        }
     }
 }
 
-// Start game only from the splash Play button.
+// Возврат на стартовый экран выбора режима (из настроек или с карты приключения).
+function returnToModeSelect() {
+    clearPendingRefill();
+    clearPendingGameOver();
+    if (isDragging) cancelDrag();
+    closeSettingsModal();
+    setHammerArmed(false);
+    setInputLocked(false);
+    // Вызываем напрямую, а не через adventureHook: карту нужно закрыть и тогда,
+    // когда режим уже переключён обратно на классику.
+    if (window.Adventure && typeof window.Adventure.closeUi === 'function') {
+        window.Adventure.closeUi();
+    }
+    gameOverScreen.classList.remove('show');
+    secondChanceModal.classList.remove('show');
+    gameContainer.classList.remove('game-over-transition');
+    hasGameStarted = false;
+    gameMode = MODE_ENDLESS;
+    if (document.body) document.body.classList.remove('mode-adventure');
+    // За полупрозрачным сплешем не должна светиться доска прошлого уровня.
+    pendingLevelSetup = null;
+    applyLevelSetup(null);
+    trayPieces = [null, null, null];
+    score = 0;
+    displayedScore = 0;
+    updateScore();
+    renderBoard();
+    renderTray();
+    splashOverlay.classList.remove('hidden');
+    setSplashPlayEnabled(isSplashPlayEnabled);
+    refreshSplashSubtitles();
+    updateSplashPlayButtonPosition();
+    syncGameplayState();
+}
+
+// Start game only from the splash mode buttons.
 splashOverlay.addEventListener('pointerdown', (e) => {
     if (hasGameStarted || !isSplashPlayEnabled) {
         return;
     }
 
-    if (splashPlayBtn && !splashPlayBtn.contains(e.target)) {
+    if (splashPlayBtn && splashPlayBtn.contains(e.target)) {
+        startGame({ mode: MODE_ENDLESS });
         return;
     }
 
-    if (!hasGameStarted) {
-        startGame();
+    if (splashAdventureBtn && splashAdventureBtn.contains(e.target)) {
+        if (window.Adventure && typeof window.Adventure.openMap === 'function') {
+            splashOverlay.classList.add('hidden');
+            window.Adventure.openMap();
+        } else {
+            // levels.js/adventure.js не загрузились — не оставляем игрока без игры.
+            startGame({ mode: MODE_ENDLESS });
+        }
+        return;
+    }
+
+    if (splashLeaderboardBtn && splashLeaderboardBtn.contains(e.target)) {
+        if (window.GameLeaderboards && typeof window.GameLeaderboards.openUi === 'function') {
+            window.GameLeaderboards.openUi('endless');
+        }
     }
 });
 
@@ -3074,10 +3697,15 @@ function decideInterstitial(sessionDurationMs) {
     return 'show';
 }
 
-function showInterstitialThenRestart() {
+function showInterstitialThen(next) {
+    const run = typeof next === 'function' ? next : () => { };
+
     if (isInterstitialInFlight) {
+        // Показ уже идёт — не глотаем переход, просто продолжаем без второй рекламы.
+        run();
         return;
     }
+
     isInterstitialInFlight = true;
     audioManager.suspend().catch(() => { });
 
@@ -3093,7 +3721,7 @@ function showInterstitialThenRestart() {
             lastInterstitialAtMs = Date.now();
         }
         // startGame() сам перезапустит аудио-сессию через beginGameSession().
-        startGame();
+        run();
     };
 
     window.GameAds.showInterstitial({
@@ -3106,27 +3734,35 @@ function showInterstitialThenRestart() {
     setTimeout(() => proceed(false), INTERSTITIAL_FALLBACK_MS);
 }
 
-function handleRestartClick() {
-    // Партия завершена и игрок начинает новую сессию — экран Game Over уже отыграл роль
-    // психологического буфера, поэтому именно здесь принимаем решение о рекламе.
-    const sessionDurationMs = sessionStartedAtMs ? (Date.now() - sessionStartedAtMs) : 0;
+// Общий шлюз межстраничной рекламы для обоих режимов: классика зовёт его на «Заново»,
+// приключение — на переходе между уровнями. Частотные лимиты и «не подряд с rewarded»
+// считаются в одном месте, поэтому режимы не могут перекрутить друг другу воронку.
+function maybeShowInterstitial(sessionDurationMs, next) {
+    const run = typeof next === 'function' ? next : () => { };
     gamesSinceInterstitial++;
 
-    const decision = decideInterstitial(sessionDurationMs);
+    const decision = decideInterstitial(sessionDurationMs || 0);
 
     if (decision === 'skip-revive') {
         skipNextInterstitial = false;
         gamesSinceInterstitial = 0;
-        startGame();
+        run();
         return;
     }
 
     if (decision === 'show') {
-        showInterstitialThenRestart();
+        showInterstitialThen(run);
         return;
     }
 
-    startGame();
+    run();
+}
+
+function handleRestartClick() {
+    // Партия завершена и игрок начинает новую сессию — экран Game Over уже отыграл роль
+    // психологического буфера, поэтому именно здесь принимаем решение о рекламе.
+    const sessionDurationMs = sessionStartedAtMs ? (Date.now() - sessionStartedAtMs) : 0;
+    maybeShowInterstitial(sessionDurationMs, () => startGame({ mode: MODE_ENDLESS }));
 }
 
 restartBtn.addEventListener('click', handleRestartClick);
@@ -3171,6 +3807,7 @@ if (secondChanceAdBtn) {
 
 if (secondChanceSkipBtn) {
     secondChanceSkipBtn.addEventListener('click', () => {
+        trackEvent('second_chance_declined', { score: score });
         pendingRewardShapes = null;
         secondChanceModal.classList.remove('show');
         finalizeBestScore();
@@ -3180,6 +3817,7 @@ if (secondChanceSkipBtn) {
 }
 
 function applySecondChanceReward() {
+    trackEvent('second_chance_taken', { score: score });
     hasUsedSecondChance = true;
     // Игрок посмотрел rewarded и возродился: гарантированно пропускаем следующий
     // interstitial и сбрасываем счётчик смертей (idle-баланс «реклама не подряд»).
@@ -3206,6 +3844,46 @@ musicToggle.addEventListener('change', event => {
     setSoundPreference(Boolean(event.target.checked));
 });
 document.addEventListener('keydown', handleGlobalKeydown);
+
+if (menuBtn) {
+    menuBtn.addEventListener('click', returnToModeSelect);
+}
+
+if (settingsLeaderboardBtn) {
+    settingsLeaderboardBtn.addEventListener('click', () => {
+        closeSettingsModal();
+        if (window.GameLeaderboards && typeof window.GameLeaderboards.openUi === 'function') {
+            window.GameLeaderboards.openUi(isAdventureMode() ? 'adventure' : 'endless');
+        }
+    });
+}
+
+// Молоток: пока бустер «взведён», тап по ячейке уничтожает её содержимое.
+// Обычный драг в это время заблокирован (см. startDrag).
+if (boardEl) {
+    boardEl.addEventListener('pointerdown', event => {
+        if (!isHammerArmed || isAnimating || isInputLocked) return;
+
+        const cellEl = event.target && event.target.closest ? event.target.closest('.cell') : null;
+        if (!cellEl || !cellEl.id) return;
+
+        const parts = cellEl.id.split('-');
+        const r = Number(parts[1]);
+        const c = Number(parts[2]);
+        if (!Number.isFinite(r) || !Number.isFinite(c)) return;
+
+        event.preventDefault();
+
+        const tally = hammerCell(r, c);
+        if (!tally) {
+            // Пустая клетка — бустер не тратим.
+            haptic.error();
+            return;
+        }
+
+        adventureHook('onHammerUsed', { r: r, c: c, collected: tally });
+    }, { passive: false });
+}
 
 document.addEventListener('pointermove', function (e) {
     if (isDragging) e.preventDefault();
@@ -3274,3 +3952,51 @@ if (debugLangBtn && isLocalDebugEnabled) {
 
 window.initGame = initGame;
 window.startGame = startGame;
+
+// --- КОНТРАКТ ЯДРА ДЛЯ adventure.js ---
+// Ядро не знает ни про цели, ни про жизни, ни про прогресс: приключение управляет
+// партией только через эти команды и получает события через window.Adventure.
+window.GameCore = {
+    MODE_ENDLESS: MODE_ENDLESS,
+    MODE_ADVENTURE: MODE_ADVENTURE,
+    BOARD_SIZE: BOARD_SIZE,
+    SHAPES: SHAPES_DATA,
+    COLORS: COLORS,
+
+    // Управление партией
+    startGame: startGame,
+    returnToModeSelect: returnToModeSelect,
+    getMode: () => gameMode,
+    getScore: () => score,
+    getComboStreak: () => comboStreak,
+    isBusy: () => isAnimating || isDragging,
+
+    // Ввод и бустеры
+    setInputLocked: setInputLocked,
+    setHammerArmed: setHammerArmed,
+    isHammerArmed: () => isHammerArmed,
+    reshuffleTray: reshuffleTray,
+    addBombTurns: addBombTurns,
+
+    // Состояние доски
+    countRemainingTargets: countRemainingTargets,
+    hasAnyValidMove: hasAnyValidMove,
+
+    // Реклама и аналитика (лимиты частоты общие с классикой)
+    maybeShowInterstitial: maybeShowInterstitial,
+    getSessionDurationMs: () => (sessionStartedAtMs ? Date.now() - sessionStartedAtMs : 0),
+    markRewardedWatched: () => {
+        // Игрок только что смотрел rewarded — следующий interstitial пропускаем.
+        skipNextInterstitial = true;
+        gamesSinceInterstitial = 0;
+    },
+    trackEvent: trackEvent,
+
+    // Утилиты представления
+    getLanguage: () => currentLanguage,
+    formatNumber: formatNumber,
+    createShapeHTML: createShapeHTML,
+    playSound: playSound,
+    haptic: haptic,
+    refreshSplashSubtitles: refreshSplashSubtitles
+};

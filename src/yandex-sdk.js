@@ -34,7 +34,7 @@
     const resumeListeners = new Set();
 
     // Константы
-    const LEADERBOARD_NAME = 'block_chpok_scores';
+    const LEADERBOARD_NAME = 'blockChpock';
     const STATS_KEY = 'bestScore';
     const DATA_KEY = 'gameData';
 
@@ -379,18 +379,26 @@
     // ============================================
 
     /**
-     * Устанавливает счет в лидерборде
+     * Устанавливает счет в произвольном лидерборде.
+     * В игре два борда (классика и приключение), поэтому имя передаётся явно.
      */
-    async function setLeaderboardScore(score, extraData) {
+    async function setBoardScore(leaderboardName, score, extraData) {
         if (!ysdk || !isMethodAvailable('leaderboards.setScore')) return false;
 
         try {
-            await ysdk.leaderboards.setScore(LEADERBOARD_NAME, score, extraData || null);
+            await ysdk.leaderboards.setScore(leaderboardName || LEADERBOARD_NAME, score, extraData || null);
             return true;
         } catch (error) {
             console.error('[Yandex SDK] Ошибка установки лидерборда:', error);
             return false;
         }
+    }
+
+    /**
+     * Устанавливает счет в лидерборде рекордов классики (обратная совместимость)
+     */
+    async function setLeaderboardScore(score, extraData) {
+        return await setBoardScore(LEADERBOARD_NAME, score, extraData);
     }
 
     /**
@@ -425,9 +433,9 @@
     }
 
     /**
-     * Получает список записей лидерборда
+     * Получает список записей произвольного лидерборда
      */
-    async function getLeaderboardEntries(options) {
+    async function getBoardEntries(leaderboardName, options) {
         if (!ysdk) return null;
 
         try {
@@ -437,11 +445,18 @@
                 quantityAround: 3
             };
             const opts = Object.assign({}, defaultOptions, options);
-            return await ysdk.leaderboards.getEntries(LEADERBOARD_NAME, opts);
+            return await ysdk.leaderboards.getEntries(leaderboardName || LEADERBOARD_NAME, opts);
         } catch (error) {
             console.error('[Yandex SDK] Ошибка получения записей:', error);
             return null;
         }
+    }
+
+    /**
+     * Получает список записей лидерборда классики (обратная совместимость)
+     */
+    async function getLeaderboardEntries(options) {
+        return await getBoardEntries(LEADERBOARD_NAME, options);
     }
 
     // ============================================
@@ -614,9 +629,11 @@
 
         // Лидерборды
         setLeaderboardScore: setLeaderboardScore,
+        setBoardScore: setBoardScore,
         getLeaderboardDescription: getLeaderboardDescription,
         getLeaderboardEntry: getLeaderboardEntry,
         getLeaderboardEntries: getLeaderboardEntries,
+        getBoardEntries: getBoardEntries,
 
         // Реклама
         showFullscreenAdv: showFullscreenAdv,

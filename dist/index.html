@@ -43,7 +43,19 @@
 
 <div class="splash-overlay" id="splash-overlay">
     <div class="splash-content">
-        <button class="splash-play-btn" id="splash-play-btn" type="button" disabled aria-hidden="true" style="display: none;">Play</button>
+        <!-- Выбор режима. Скрыт инлайновым display:none до того, как game.js
+             отправит LoadingAPI.ready() и включит панель (требование 1.19). -->
+        <div class="splash-modes" id="splash-modes" aria-hidden="true" style="display: none;">
+            <button class="splash-mode-btn splash-mode-adventure" id="splash-play-adventure" type="button" disabled>
+                <span class="splash-mode-title" id="splash-adventure-title">Adventure</span>
+                <span class="splash-mode-sub" id="splash-adventure-sub"></span>
+            </button>
+            <button class="splash-mode-btn splash-mode-classic" id="splash-play-btn" type="button" disabled>
+                <span class="splash-mode-title" id="splash-classic-title">Classic</span>
+                <span class="splash-mode-sub" id="splash-classic-sub"></span>
+            </button>
+            <button class="splash-ghost-btn" id="splash-leaderboard-btn" type="button" disabled>Leaderboard</button>
+        </div>
     </div>
 </div>
 
@@ -72,6 +84,18 @@
                 </div>
             </div>
         </div>
+        <!-- HUD приключения: номер уровня, остаток ходов и чипы целей.
+             Наполняется из adventure.js, в классике скрыт. -->
+        <div class="adventure-hud" id="adventure-hud" hidden>
+            <div class="adventure-hud-top">
+                <span class="adventure-hud-level" id="adventure-hud-level"></span>
+                <span class="adventure-moves">
+                    <span class="adventure-moves-value" id="adventure-moves-value">0</span>
+                </span>
+            </div>
+            <div class="adventure-goals" id="adventure-goals"></div>
+        </div>
+
         <span id="best-score" class="visually-hidden">0</span>
         <span id="main-score" class="visually-hidden">0</span>
     </div>
@@ -85,6 +109,10 @@
         <div class="tray-slot" id="slot-0"></div>
         <div class="tray-slot" id="slot-1"></div>
         <div class="tray-slot" id="slot-2"></div>
+        <!-- Бустеры приключения (молоток / перемешать) живут ВНУТРИ трея: отдельная
+             строка съедала вертикаль и уезжала за экран на невысоких вьюпортах.
+             Кнопки строит adventure.js. -->
+        <div class="adventure-boosters" id="adventure-boosters" hidden></div>
     </div>
 
     <canvas id="particles-canvas" class="particles-canvas"></canvas>
@@ -107,6 +135,10 @@
                     <span class="toggle-slider"></span>
                 </span>
             </label>
+            <div class="settings-actions">
+                <button class="btn btn-outline settings-action-btn" id="settings-leaderboard-btn" type="button">Leaderboard</button>
+                <button class="btn btn-outline settings-action-btn" id="settings-menu-btn" type="button">Main menu</button>
+            </div>
         </div>
     </div>
 
@@ -136,6 +168,12 @@
 <!-- PixiJS (вендорный, офлайн) + WebGL-рендерер игрового поля. Должны загрузиться ДО game.js. -->
 <script src="pixi.min.js"></script>
 <script src="pixi-renderer.js"></script>
+<!-- Режим «Приключение»: данные уровней -> лидерборды -> мета-логика.
+     Все три должны загрузиться ДО game.js: на старте он читает window.Adventure,
+     чтобы решить, показывать ли кнопку режима. -->
+<script src="levels.js"></script>
+<script src="leaderboards.js"></script>
+<script src="adventure.js"></script>
 <script src="game.js"></script>
 </body>
 </html>

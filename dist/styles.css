@@ -77,9 +77,27 @@ body {
 
 .game-container {
     width: 100%;
-    max-width: min(430px, calc(100svh * 0.75 - 165px));
+    max-width: 430px;
     height: 100%;
     max-height: 932px;
+    /* ------------------------------------------------------------------
+       Ширина игровой колонки (--play-w).
+       Три блока растут вместе с шириной: баннер персонажа (W / 2.78 —
+       пропорция спрайта), доска (W) и трей из трёх квадратов (W / 3);
+       панели счёта наплывают на ветку на 6.5% W. Итого по высоте это
+       ≈ 1.63 * W. Всё остальное от ширины не зависит и собрано в
+       --chrome-h (паддинги контейнера, панели счёта, вертикальные
+       отступы), ряд HUD приключения — в --hud-h.
+       Отсюда: W = 0.61 * (доступная высота - chrome).
+       Раньше вместо этого у .header был фиксированный min-height на
+       каждый брейкпоинт: на невысоких экранах баннер (его высота — от
+       ШИРИНЫ) в него не влезал, и панели наезжали на персонажа.
+       --chrome-h / --hud-h / --avail-h переопределяются в брейкпоинтах:
+       там другие паддинги и размеры панелей. ------------------------- */
+    --avail-h: min(100svh, 932px);
+    --chrome-h: 168px;
+    --hud-h: 0px;
+    --play-w: calc((var(--avail-h) - var(--chrome-h) - var(--hud-h)) * 0.61);
     display: flex;
     flex-direction: column;
     padding: 20px 15px;
@@ -94,6 +112,11 @@ body {
         linear-gradient(180deg, rgba(159, 105, 67, 0.14) 0%, rgba(94, 55, 37, 0.22) 100%);
     background-color: rgba(249, 232, 208, 0.68); */
     background: url('./assets/theme/background-room.jpg') center / auto 100% no-repeat;
+}
+
+/* Ряд HUD приключения — ещё один этаж в шапке, доска на него сужается. */
+body.mode-adventure .game-container {
+    --hud-h: 50px;
 }
 
 .game-container::after {
@@ -114,22 +137,22 @@ body.low-perf-effects {
 .header {
     position: relative;
     margin-bottom: 14px;
-    padding-top: 26px;
-    padding-bottom: 4px;
-    min-height: 200px;
+    padding-top: 12px;
     display: flex;
     flex-direction: column;
-    justify-content: flex-end;
 }
 
+/* Баннер в потоке: его высота (пропорция спрайта) и задаёт высоту шапки,
+   поэтому панели счёта и HUD всегда встают ПОД персонажа. Ширина — по доске
+   (--play-w), а панели счёта и HUD остаются во всю ширину контейнера: им
+   нужна каждая доступная точка под чипы целей. */
 .header-banner {
-    position: absolute;
-    top: 10px;
-    left: 0;
+    position: relative;
     width: 100%;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
+    max-width: var(--play-w);
+    margin: 0 auto;
+    aspect-ratio: 883 / 318;
+    display: block;
     pointer-events: none;
     z-index: 1; /* Below stats but above background */
 }
@@ -137,7 +160,6 @@ body.low-perf-effects {
 .header-branch-banner {
     width: 100%;
     height: auto;
-    max-width: 460px;
     filter: drop-shadow(0 7px 10px rgba(70, 38, 18, 0.28));
 }
 
@@ -146,14 +168,18 @@ body.low-perf-effects .stat-panel {
     filter: none;
 }
 
+/* Состояния выровнены по НИЗУ: у всех четырёх спрайтов ветка на одинаковом
+   расстоянии от нижнего края (883x318 / 323 / 355 / 289), а пар и пламя
+   добавляют высоту сверху. При выравнивании по верху ветка вместе с
+   персонажем съезжала вниз — прямо на панель счёта. */
 .header-branch-banner-state {
     position: absolute;
-    left: 50%;
-    top: 0;
-    transform: translate(-50%, 0);
+    left: 0;
+    top: auto;
+    bottom: 0;
+    transform: none;
     width: 100%;
     height: auto;
-    max-width: 460px;
     opacity: 0;
     transition: opacity 0.225s ease-in-out;
     pointer-events: none;
@@ -179,7 +205,9 @@ body.low-perf-effects .stat-panel {
     justify-content: space-between;
     align-items: flex-end;
     gap: 12px;
-    margin-top: -28px;
+    /* Наплыв на ветку — в процентах от ширины шапки, чтобы он масштабировался
+       вместе с баннером (проценты вертикальных margin считаются от ШИРИНЫ). */
+    margin-top: -6.5%;
     padding: 0 6px;
     z-index: 3;
     flex-shrink: 0;
@@ -366,7 +394,9 @@ body.low-perf-effects .stat-panel {
     border-radius: 24px;
     padding: 12px;
     box-shadow: 0 14px 28px rgba(115, 61, 36, 0.25), 0 4px 12px rgba(255, 255, 255, 0.2);
-    margin-bottom: 20px;
+    width: 100%;
+    max-width: var(--play-w);
+    margin: 0 auto 20px;
     position: relative;
     z-index: 2;
 }
@@ -569,8 +599,28 @@ body.low-perf-effects .block-item:not(.no-pop) {
     display: flex;
     justify-content: space-between;
     gap: 10px;
-    margin-bottom: 20px;
+    width: 100%;
+    max-width: var(--play-w);
+    margin: 0 auto 20px;
     flex-shrink: 0;
+    position: relative;
+}
+
+/* Затемнённая «полка» под треем. Подложек у слотов больше нет — вместо них
+   притемняется вся нижняя часть контейнера, поэтому полоса шире самого трея:
+   тянется до краёв .game-container, лишнее срезает его overflow: hidden. */
+.tray::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200vw;
+    top: -16px;
+    bottom: -100vh;
+    background: rgba(36, 18, 9, 0.82);
+    box-shadow: inset 0 1px 0 rgba(255, 228, 196, 0.12);
+    pointer-events: none;
+    z-index: 0;
 }
 
 .tray-slot {
@@ -578,15 +628,16 @@ body.low-perf-effects .block-item:not(.no-pop) {
     aspect-ratio: 1 / 1;
     min-width: 0;
     min-height: 0;
-    background: linear-gradient(180deg, rgba(122, 76, 55, 0.92) 0%, rgba(95, 55, 38, 0.92) 100%);
-    border: 1px solid rgba(255, 228, 196, 0.3);
+    /* Без подложки: фигуры лежат прямо на затемнённой полке. */
+    background: none;
+    border: none;
     border-radius: 18px;
     display: flex;
     justify-content: center;
     align-items: center;
     position: relative;
     overflow: hidden;
-    box-shadow: inset 0 3px 8px rgba(255, 238, 217, 0.08), 0 8px 14px rgba(79, 41, 20, 0.2);
+    box-shadow: none;
     z-index: 20;
 }
 
@@ -1037,6 +1088,7 @@ body.low-perf-effects .praise-popup {
         border-radius: 0;
         box-shadow: none;
         max-height: 100svh;
+        --avail-h: 100svh;
     }
     .header-stats {
         justify-content: space-between;
@@ -1054,20 +1106,20 @@ body.low-perf-effects .praise-popup {
         padding: 12px 0;
     }
     .game-container {
-        width: min(100%, 430px, calc(100svh * 0.75 - 110px));
-        max-height: 780px;
+        width: min(100%, 430px);
+        max-height: 860px;
         padding: 10px 12px 12px;
+        /* 22 = паддинги контейнера, 10 = отбивка сверху, 58 = панель счёта,
+           30 = отступы шапки/доски/трея */
+        --avail-h: min(calc(100svh - 24px), 860px);
+        --chrome-h: 114px;
+    }
+    body.mode-adventure .game-container {
+        --hud-h: 48px;
     }
     .header {
-        min-height: 138px;
         margin-bottom: 10px;
-        padding-top: 34px;
-    }
-    .header-banner {
-        /* height and absolute positioning */
-    }
-    .header-stats {
-        margin-top: -22px;
+        padding-top: 10px;
     }
     .stat-panel-body {
         font-size: 18px;
@@ -1092,18 +1144,16 @@ body.low-perf-effects .praise-popup {
 @media (max-height: 750px) {
     .game-container {
         padding: 8px 12px;
-        max-width: min(430px, calc(100svh * 0.75 - 110px));
+        /* 16 = паддинги контейнера, 10 = отбивка сверху, 52 = панель счёта,
+           28 = отступы шапки/доски/трея */
+        --chrome-h: 100px;
+    }
+    body.mode-adventure .game-container {
+        --hud-h: 46px;
     }
     .header {
-        min-height: 138px;
         margin-bottom: 8px;
         padding-top: 10px;
-    }
-    .header-banner {
-        /* height and absolute positioning */
-    }
-    .header-stats {
-        margin-top: -22px;
     }
     .stat-panel-body {
         font-size: 16px;
@@ -1154,6 +1204,101 @@ body.low-perf-effects .praise-popup {
     font-family: 'Nunito', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+/* ============================================================
+   ВЫБОР РЕЖИМА НА СПЛЕШЕ
+   Панель позиционируется из JS в центр доски (updateSplashPlayButtonPosition).
+   ============================================================ */
+.splash-modes {
+    position: fixed;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    width: min(78vw, 290px);
+    pointer-events: auto;
+    z-index: 1;
+}
+
+.splash-mode-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 14px 20px;
+    border: none;
+    border-radius: 22px;
+    cursor: pointer;
+    font-family: inherit;
+    color: #fff;
+    text-shadow: 0 2px 0 rgba(60, 24, 8, 0.45);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.splash-mode-btn:active {
+    transform: translateY(3px);
+}
+
+.splash-mode-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.splash-mode-title {
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.splash-mode-sub {
+    font-size: 12px;
+    font-weight: 700;
+    opacity: 0.9;
+}
+
+.splash-mode-adventure {
+    background: linear-gradient(180deg, #67c93c 0%, #3f9a24 100%);
+    box-shadow: 0 6px 0 #2c6d18, inset 0 2px 0 rgba(255, 255, 255, 0.4);
+}
+
+.splash-mode-adventure:active {
+    box-shadow: 0 3px 0 #2c6d18, inset 0 2px 0 rgba(255, 255, 255, 0.4);
+}
+
+.splash-mode-classic {
+    background: linear-gradient(180deg, #f59e0b 0%, #ea7a10 100%);
+    box-shadow: 0 6px 0 #b45309, inset 0 2px 0 rgba(255, 255, 255, 0.4);
+}
+
+.splash-mode-classic:active {
+    box-shadow: 0 3px 0 #b45309, inset 0 2px 0 rgba(255, 255, 255, 0.4);
+}
+
+.splash-ghost-btn {
+    padding: 9px 16px;
+    border-radius: 18px;
+    border: 2px solid rgba(255, 244, 224, 0.55);
+    background: rgba(35, 18, 10, 0.35);
+    color: #fff3e0;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.splash-ghost-btn:active {
+    background: rgba(35, 18, 10, 0.55);
+    transform: translateY(2px);
+}
+
+.splash-ghost-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 .splash-overlay.hidden {
     display: none;
 }
@@ -1202,20 +1347,22 @@ body.low-perf-effects .praise-popup {
     }
     .game-container {
         width: 100%;
-        max-width: min(380px, calc(100svh * 0.75 - 65px));
+        max-width: 380px;
         max-height: 100svh;
         padding: 5px 10px;
+        /* 10 = паддинги контейнера, 8 = отбивка сверху, 47 = панель счёта,
+           13 = отступы шапки/доски/трея + запас на бейджи бустеров */
+        --avail-h: 100svh;
+        --chrome-h: 80px;
+    }
+    body.mode-adventure .game-container {
+        --hud-h: 40px;
     }
     .header {
-        min-height: 96px;
         margin-bottom: 5px;
-        padding-top: 6px;
-    }
-    .header-banner {
-        /* height and absolute positioning */
+        padding-top: 8px;
     }
     .header-stats {
-        margin-top: -18px;
         justify-content: space-between;
     }
     .crystal-panel {
@@ -1296,7 +1443,7 @@ body.low-perf-effects .praise-popup {
         position: static;
         min-height: 0;
         height: 100%;
-        margin-bottom: 0;
+        margin: 0;
         padding: clamp(38px, 9vh, 68px) 0 0;
         display: flex;
         flex-direction: column;
@@ -1309,9 +1456,11 @@ body.low-perf-effects .praise-popup {
         position: relative;
         top: auto;
         left: auto;
+        /* Колонками управляет грид — ограничение по --play-w здесь не нужно. */
         width: min(148%, 300px);
-        aspect-ratio: 886 / 296;
-        margin-left: clamp(-38px, -3vw, -14px);
+        max-width: none;
+        aspect-ratio: 883 / 318;
+        margin: 0 0 0 clamp(-38px, -3vw, -14px);
         display: block;
         pointer-events: none;
     }
@@ -1320,12 +1469,6 @@ body.low-perf-effects .praise-popup {
     .header-branch-banner-state {
         width: 100%;
         max-width: none;
-    }
-
-    .header-branch-banner-state {
-        left: 0;
-        top: 0;
-        transform: none;
     }
 
     .settings-btn {
@@ -1392,7 +1535,8 @@ body.low-perf-effects .praise-popup {
         grid-row: 1;
         align-self: center;
         justify-self: center;
-        margin-bottom: 0;
+        max-width: none;
+        margin: 0;
         padding: var(--landscape-board-pad);
         width: min(
             100%,
@@ -1413,7 +1557,8 @@ body.low-perf-effects .praise-popup {
         grid-column: 3;
         grid-row: 1;
         height: 100%;
-        margin-bottom: 0;
+        max-width: none;
+        margin: 0;
         display: flex;
         flex-direction: column;
         align-items: stretch;
@@ -1425,4 +1570,1244 @@ body.low-perf-effects .praise-popup {
         flex: 0 0 auto;
         width: 100%;
     }
+
+    /* Трей здесь — правая колонка, поэтому и затемнение вертикальное: полоса от
+       левого края трея до правого края контейнера. Позиционируется от
+       .game-container (трей возвращаем в static), иначе бустеры, лежащие
+       внутри трея, привязались бы к нему, а не к контейнеру. */
+    .tray {
+        position: static;
+    }
+
+    .tray::before {
+        /* Отрицательные отступы — абсолютные координаты считаются от padding-box
+           контейнера, а полоса должна доходить до его краёв. Здесь полоса без
+           градиента: ровная тёмная панель с тонкой светлой кромкой слева. */
+        top: calc(-1 * var(--landscape-container-pad-y));
+        bottom: calc(-1 * var(--landscape-container-pad-y));
+        right: calc(-1 * var(--landscape-container-pad-x));
+        left: auto;
+        width: calc(var(--landscape-right-rail) + var(--landscape-container-pad-x) + 34px);
+        height: auto;
+        transform: none;
+        background: rgba(36, 18, 9, 0.82);
+        box-shadow: inset 1px 0 0 rgba(255, 228, 196, 0.12);
+    }
 }
+
+/* ============================================================
+   РЕЖИМ «ПРИКЛЮЧЕНИЕ»
+   1. Препятствия на доске (DOM-оверлеи, работают в DOM- и Pixi-рендере)
+   2. HUD целей и бустеры
+   3. Карта уровней
+   4. Модалки (интро / победа / провал / жизни)
+   5. Лидерборды
+   ============================================================ */
+
+/* --- 1. Препятствия -------------------------------------------------
+   z-index рассчитан относительно стека .board-container:
+     pixi-канвас = 3, .block-item = 30, .cell.preview = 32.
+   Поэтому лёд (под блоком) держим на 1, «твёрдые» препятствия на 28
+   (клетка под ними всегда пустая), а самоцвет на 31 — он поверх блока. */
+.cell-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    font-weight: 900;
+    font-size: 15px;
+    z-index: 28;
+}
+
+.cell.cell-void {
+    background: none;
+    background-color: rgba(18, 9, 5, 0.62);
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.7);
+}
+
+.cell-overlay-rock {
+    margin: 4%;
+    border-radius: 16%;
+    background:
+        radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.35) 0 18%, transparent 40%),
+        linear-gradient(160deg, #b8b2ab 0%, #8d8781 55%, #6f6a65 100%);
+    box-shadow: inset 0 -3px 4px rgba(40, 36, 32, 0.55), 0 2px 3px rgba(30, 14, 6, 0.4);
+    color: #4a4540;
+}
+
+.cell-overlay-crate {
+    margin: 4%;
+    border-radius: 14%;
+    background:
+        repeating-linear-gradient(90deg, rgba(90, 48, 20, 0.35) 0 2px, transparent 2px 26%),
+        linear-gradient(170deg, #d9974f 0%, #b06f2f 60%, #8c521f 100%);
+    border: 2px solid #7a441a;
+    box-shadow: inset 0 2px 0 rgba(255, 224, 180, 0.4), 0 2px 3px rgba(30, 14, 6, 0.4);
+    color: #4a2a10;
+}
+
+.cell-overlay-ice {
+    margin: 0;
+    border-radius: 8%;
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.55) 0 22%, transparent 22% 45%, rgba(255, 255, 255, 0.35) 45% 60%, transparent 60%),
+        linear-gradient(180deg, rgba(168, 228, 255, 0.72) 0%, rgba(96, 176, 224, 0.72) 100%);
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.45);
+    color: #12506e;
+    z-index: 1;
+}
+
+.cell-overlay-bomb {
+    margin: 8%;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.5) 0 16%, transparent 38%),
+        linear-gradient(170deg, #4a4a52 0%, #22222a 100%);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45), inset 0 -2px 3px rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 16px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.cell-overlay-urgent {
+    animation: bombPulse 0.7s ease-in-out infinite;
+    background:
+        radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.5) 0 16%, transparent 38%),
+        linear-gradient(170deg, #c8352a 0%, #7a1a12 100%);
+}
+
+@keyframes bombPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.12); }
+}
+
+body.low-perf-effects .cell-overlay-urgent {
+    animation: none;
+}
+
+/* Самоцвет рисуется поверх своего блока — его нужно видеть до сброса линии. */
+.cell-overlay-gem {
+    z-index: 31;
+}
+
+.cell-overlay-gem::after {
+    content: '';
+    width: 44%;
+    height: 44%;
+    transform: rotate(45deg);
+    border-radius: 12%;
+    background: linear-gradient(135deg, #eafcff 0%, #59e8ff 45%, #1f9fd0 100%);
+    box-shadow: 0 0 8px rgba(89, 232, 255, 0.85), inset 0 1px 2px rgba(255, 255, 255, 0.9);
+}
+
+/* Остаток «прочности» пишем цифрой — читается лучше любых трещин. */
+.cell-overlay-hp2::after { content: '2'; }
+.cell-overlay-hp3::after { content: '3'; }
+
+.cell-hit {
+    animation: cellHit 0.26s ease-out;
+}
+
+@keyframes cellHit {
+    0% { transform: scale(1); }
+    45% { transform: scale(0.9); filter: brightness(1.5); }
+    100% { transform: scale(1); }
+}
+
+body.hammer-armed .board {
+    cursor: crosshair;
+    box-shadow: inset 0 0 0 3px rgba(255, 196, 84, 0.9), inset 0 6px 10px rgba(20, 8, 4, 0.45);
+}
+
+/* --- 2. HUD целей и бустеры ---------------------------------------- */
+.mode-adventure .crystal-panel {
+    display: none;
+}
+
+/* Ряд HUD добавляет высоту в .header (justify-content: flex-end), из-за чего панель
+   счёта поднимается под кнопку настроек в левом верхнем углу. Панель «Рекорд» в
+   приключении скрыта, поэтому просто прижимаем оставшийся счёт вправо — коллизии
+   с шестерёнкой больше нет ни на одном вьюпорте. */
+.mode-adventure .header-stats {
+    justify-content: flex-end;
+}
+
+/* Одна строка, без переноса: HUD добавляется в конец .header (justify-content: flex-end),
+   поэтому каждый лишний ряд поднимает панели счёта вверх — прямо под кнопку настроек.
+   Цели при нехватке места скроллятся по горизонтали, а не переносятся. */
+.adventure-hud {
+    position: relative;
+    /* Ниже .board-container (z-index 2): нижняя кромка бара уходит ЗА игровое
+       поле. Скрытая часть — это padding-bottom, поэтому текст и иконки целиком
+       остаются на виду, а по вертикали бар занимает меньше, чем его высота. */
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    margin-top: 6px;
+    margin-bottom: -22px;
+    padding: 6px 12px 26px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(255, 240, 214, 0.92) 0%, rgba(246, 214, 163, 0.92) 100%);
+    border: 2px solid #9b6134;
+    box-shadow: 0 3px 0 #8a542d, 0 6px 12px rgba(74, 39, 19, 0.22);
+}
+
+.adventure-hud[hidden] {
+    display: none;
+}
+
+.adventure-hud-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+}
+
+/* Размеры HUD растут с шириной экрана и упираются в потолок «дизайнерских»
+   430 px: на телефоне текст и иконки должны читаться, но четыре чипа целей
+   обязаны влезать в ряд. */
+.adventure-hud-level {
+    font-size: clamp(15px, 4.6vw, 20px);
+    font-weight: 900;
+    color: #5b311d;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.adventure-moves {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 12px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #4cb6f0 0%, #2e8ac7 100%);
+    box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.45);
+    color: #fff;
+    font-weight: 900;
+    font-size: clamp(19px, 6vw, 26px);
+    text-shadow: 0 1px 0 rgba(12, 48, 74, 0.6);
+}
+
+.adventure-moves::after {
+    content: '';
+    width: clamp(18px, 5.6vw, 24px);
+    height: clamp(18px, 5.6vw, 24px);
+    background: url('assets/theme/icons/icon-moves.png') center / contain no-repeat;
+    opacity: 0.9;
+}
+
+.adventure-moves-value.adv-moves-low {
+    animation: movesLow 0.8s ease-in-out infinite;
+    color: #ffe08a;
+}
+
+@keyframes movesLow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+
+.adventure-goals {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    scrollbar-width: none;
+    padding: 2px 0;
+}
+
+.adventure-goals::-webkit-scrollbar {
+    display: none;
+}
+
+.adv-chip {
+    display: inline-flex;
+    align-items: center;
+    /* Не сжимаемся: сжатый чип обрезал собственный текст («0/900» -> «/900»). */
+    flex: 0 0 auto;
+    gap: 6px;
+    padding: 2px 11px 2px 6px;
+    border-radius: 999px;
+    background: rgba(109, 63, 49, 0.16);
+    border: 1.5px solid rgba(109, 63, 49, 0.3);
+    color: #4a2a15;
+    font-size: clamp(15px, 4.6vw, 20px);
+    font-weight: 900;
+    white-space: nowrap;
+}
+
+/* Уровни с 3-4 целями: крупные чипы в ряд не влезают, поэтому здесь они ужаты.
+   Класс ставит adventure.js по числу целей. */
+body.adv-goals-many .adv-chip {
+    font-size: clamp(13px, 3.9vw, 17px);
+    gap: 4px;
+    padding: 1px 8px 1px 4px;
+}
+
+body.adv-goals-many .adv-chip-icon {
+    width: clamp(17px, 5.2vw, 22px);
+    height: clamp(17px, 5.2vw, 22px);
+}
+
+/* Целый ряд под цели: иначе чипы «доламываются» вокруг номера уровня и счётчика
+   ходов и раскладка выглядит случайной. */
+body.adv-goals-many .adventure-goals {
+    flex-basis: 100%;
+    justify-content: flex-start;
+}
+
+.adv-chip-done {
+    background: rgba(102, 204, 51, 0.28);
+    border-color: rgba(56, 130, 20, 0.55);
+    color: #2f6d0f;
+}
+
+.adv-chip-done .adv-chip-text {
+    text-decoration: line-through;
+    opacity: 0.75;
+}
+
+/* Иконки интерфейса — спрайты из assets/theme/icons.
+   Плейсхолдеры генерирует scripts/make-icon-placeholders.mjs; финальный арт кладётся
+   ПОД ТЕМИ ЖЕ ИМЕНАМИ и в тех же размерах, править CSS/код при замене не нужно.
+   Таблица «файл -> где используется -> размер» — в docs/ADVENTURE_MODE.md.
+   Иконка встречается в двух формах: как дочерний .adv-chip-icon внутри чипа HUD и
+   как самостоятельный элемент с обоими классами в списке целей — отсюда парные селекторы. */
+.adv-chip-icon {
+    width: clamp(21px, 6.4vw, 28px);
+    height: clamp(21px, 6.4vw, 28px);
+    flex: 0 0 auto;
+    background: center / contain no-repeat;
+}
+
+.adv-chip-score .adv-chip-icon,
+.adv-chip-score.adv-chip-icon { background-image: url('assets/theme/icons/icon-goal-score.png'); }
+.adv-chip-lines .adv-chip-icon,
+.adv-chip-lines.adv-chip-icon { background-image: url('assets/theme/icons/icon-goal-lines.png'); }
+.adv-chip-blocks .adv-chip-icon,
+.adv-chip-blocks.adv-chip-icon { background-image: url('assets/theme/icons/icon-goal-blocks.png'); }
+.adv-chip-crate .adv-chip-icon,
+.adv-chip-crate.adv-chip-icon { background-image: url('assets/theme/icons/icon-goal-crate.png'); }
+.adv-chip-ice .adv-chip-icon,
+.adv-chip-ice.adv-chip-icon { background-image: url('assets/theme/icons/icon-goal-ice.png'); }
+.adv-chip-gem .adv-chip-icon,
+.adv-chip-gem.adv-chip-icon { background-image: url('assets/theme/icons/icon-goal-gem.png'); }
+.adv-chip-bomb .adv-chip-icon,
+.adv-chip-bomb.adv-chip-icon { background-image: url('assets/theme/icons/icon-goal-bomb.png'); }
+.adv-chip-combo .adv-chip-icon,
+.adv-chip-combo.adv-chip-icon { background-image: url('assets/theme/icons/icon-goal-combo.png'); }
+.adv-chip-moves .adv-chip-icon,
+.adv-chip-moves.adv-chip-icon { background-image: url('assets/theme/icons/icon-goal-placements.png'); }
+.adv-chip-color .adv-chip-icon,
+.adv-chip-color.adv-chip-icon { background-image: url('assets/theme/icons/icon-goal-color.png'); }
+
+/* В списке целей (интро/итоги) иконка крупнее, чем в чипе HUD. */
+.adv-goal-row .adv-chip-icon {
+    width: 22px;
+    height: 22px;
+}
+
+/* Колонка бустеров — четвёртый элемент флекс-строки трея. Слоты сами сужаются
+   (flex: 1 + aspect-ratio), поэтому высота игрового экрана не меняется. */
+.adventure-boosters {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 10px;
+    flex: 0 0 auto;
+}
+
+.adventure-boosters[hidden] {
+    display: none;
+}
+
+.adv-booster {
+    position: relative;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    border: 2px solid #7a3f1d;
+    background: linear-gradient(180deg, #f6d6a3 0%, #dfb177 100%);
+    box-shadow: 0 4px 0 #8a542d, inset 0 2px 0 rgba(255, 245, 225, 0.6);
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.adv-booster:active {
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 #8a542d, inset 0 2px 0 rgba(255, 245, 225, 0.6);
+}
+
+.adv-booster-armed {
+    background: linear-gradient(180deg, #ffe08a 0%, #ffb347 100%);
+    box-shadow: 0 0 0 3px rgba(255, 196, 84, 0.65), 0 4px 0 #8a542d;
+}
+
+.adv-booster-icon {
+    width: 30px;
+    height: 30px;
+    background: center / contain no-repeat;
+}
+
+.adv-booster-hammer .adv-booster-icon { background-image: url('assets/theme/icons/icon-booster-hammer.png'); }
+.adv-booster-shuffle .adv-booster-icon { background-image: url('assets/theme/icons/icon-booster-shuffle.png'); }
+
+.adv-booster-count {
+    position: absolute;
+    right: -5px;
+    bottom: -5px;
+    min-width: 21px;
+    height: 21px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #67c93c 0%, #3f9a24 100%);
+    border: 2px solid #fff4e0;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 17px;
+    text-align: center;
+}
+
+/* --- 3. Карта уровней ---------------------------------------------- */
+.adv-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 3400;
+    display: flex;
+    flex-direction: column;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    font-family: 'Nunito', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.adv-overlay.show {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.adv-map {
+    background: #1a0c05;
+}
+
+/* Фон карты — арт главы. Два слоя лежат друг на друге и меняются кроссфейдом
+   (см. setMapBackground в adventure.js); скрим сверху держит контраст UI. */
+.adv-map-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.adv-map-bg-layer {
+    position: absolute;
+    inset: 0;
+    background: center / cover no-repeat;
+    opacity: 0;
+    transition: opacity 0.55s ease;
+}
+
+.adv-map-bg-layer.is-visible {
+    opacity: 1;
+}
+
+.adv-map-bg-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    background: linear-gradient(180deg, rgba(30, 14, 6, 0.62) 0%, rgba(22, 10, 4, 0.5) 45%, rgba(20, 9, 4, 0.72) 100%);
+}
+
+.adv-map-top {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px 14px 10px;
+    flex: 0 0 auto;
+}
+
+.adv-icon-btn {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 14px;
+    border: 2px solid rgba(255, 240, 214, 0.5);
+    background: rgba(50, 25, 12, 0.55);
+    color: #fff4e0;
+    font-size: 24px;
+    font-weight: 900;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+}
+
+.adv-icon-btn:active {
+    transform: translateY(2px);
+}
+
+/* Стрелка «назад» — SVG-шеврон вместо глифа «‹»: у типографского символа своя
+   метрика (ink смещён внутри em-квадрата), из-за неё стрелка съезжала от центра.
+   Путь нарисован симметрично относительно центра viewBox 24×24. */
+.adv-back-btn {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff4e0' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15.5 5 L8.5 12 L15.5 19'/%3E%3C/svg%3E");
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 22px 22px;
+}
+
+/* Кнопка рейтинга — иконка вместо текстовой метки (label задаётся через aria-label).
+   Должна идти ПОСЛЕ .adv-icon-btn: там background задан шорткатом и обнуляет image. */
+.adv-lb-btn {
+    background-image: url('assets/theme/icons/icon-trophy.png');
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 24px 24px;
+}
+
+.adv-map-counters {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.adv-hearts,
+.adv-total-stars {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(255, 240, 214, 0.92);
+    border: 2px solid #9b6134;
+    color: #5b311d;
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.adv-heart-icon,
+.adv-star-badge {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    background: center / contain no-repeat;
+}
+
+.adv-heart-icon {
+    background-image: url('assets/theme/icons/icon-heart.png');
+}
+
+.adv-star-badge {
+    background-image: url('assets/theme/icons/icon-star-filled.png');
+}
+
+.adv-heart-timer {
+    font-size: 11px;
+    font-weight: 800;
+    opacity: 0.7;
+}
+
+.adv-map-scroll {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 0 30px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.adv-chapter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    margin: 18px 0 6px;
+    padding: 8px 22px;
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255, 240, 214, 0.95) 0%, rgba(240, 205, 155, 0.95) 100%);
+    border: 2px solid #9b6134;
+    box-shadow: 0 3px 0 #8a542d;
+}
+
+.adv-chapter-index {
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #a4632c;
+}
+
+.adv-chapter-name {
+    font-size: 17px;
+    font-weight: 900;
+    color: #5b311d;
+}
+
+/* Серпантин: чётные узлы уводим влево, нечётные вправо — читается как тропинка. */
+.adv-node {
+    position: relative;
+    width: 66px;
+    height: 66px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    border: 3px solid #7a3f1d;
+    background: linear-gradient(180deg, #f6d6a3 0%, #dfb177 100%);
+    box-shadow: 0 5px 0 #8a542d, 0 8px 14px rgba(20, 10, 4, 0.35);
+    color: #5b311d;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    transition: transform 0.12s ease;
+}
+
+.adv-node:nth-of-type(even) { transform: translateX(-46px); }
+.adv-node:nth-of-type(odd) { transform: translateX(46px); }
+
+.adv-node:active {
+    filter: brightness(1.08);
+}
+
+.adv-node-index {
+    font-size: 22px;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.adv-node-done {
+    background: linear-gradient(180deg, #8ee05a 0%, #4fa62c 100%);
+    border-color: #2c6d18;
+    box-shadow: 0 5px 0 #2c6d18, 0 8px 14px rgba(20, 10, 4, 0.35);
+    color: #1e4a0c;
+}
+
+.adv-node-locked {
+    background: linear-gradient(180deg, #a89c92 0%, #7d7268 100%);
+    border-color: #5a5049;
+    box-shadow: 0 5px 0 #5a5049;
+    color: rgba(255, 255, 255, 0.75);
+    cursor: default;
+}
+
+.adv-node-locked .adv-node-index {
+    opacity: 0;
+}
+
+.adv-node-locked::after {
+    content: '';
+    position: absolute;
+    width: 26px;
+    height: 26px;
+    background: url('assets/theme/icons/icon-lock.png') center / contain no-repeat;
+}
+
+.adv-node-current {
+    animation: nodePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes nodePulse {
+    0%, 100% { box-shadow: 0 5px 0 #8a542d, 0 0 0 0 rgba(255, 214, 120, 0.8); }
+    50% { box-shadow: 0 5px 0 #8a542d, 0 0 0 12px rgba(255, 214, 120, 0); }
+}
+
+body.low-perf-effects .adv-node-current {
+    animation: none;
+}
+
+.adv-stars-row {
+    display: flex;
+    gap: 2px;
+}
+
+.adv-star {
+    width: 11px;
+    height: 11px;
+    background: url('assets/theme/icons/icon-star-empty.png') center / contain no-repeat;
+}
+
+.adv-star-filled {
+    background-image: url('assets/theme/icons/icon-star-filled.png');
+}
+
+.adv-stars-big {
+    gap: 8px;
+    margin: 6px 0 10px;
+    justify-content: center;
+}
+
+.adv-stars-big .adv-star {
+    width: 38px;
+    height: 38px;
+}
+
+/* --- 4. Модалки приключения ---------------------------------------- */
+.adv-modal-overlay {
+    z-index: 3500;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(10, 5, 2, 0.62);
+}
+
+.adv-panel {
+    width: min(100%, 340px);
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 20px;
+    border-radius: 26px;
+    background: linear-gradient(180deg, #fff6e6 0%, #f6dcb6 100%);
+    border: 3px solid #9b6134;
+    box-shadow: 0 6px 0 #8a542d, 0 20px 40px rgba(20, 10, 4, 0.45);
+    text-align: center;
+    transform: translateY(14px) scale(0.97);
+    transition: transform 0.25s ease;
+}
+
+.adv-modal-overlay.show .adv-panel {
+    transform: translateY(0) scale(1);
+}
+
+.adv-panel-eyebrow {
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #a4632c;
+}
+
+.adv-panel-title {
+    margin: 2px 0 10px;
+    font-size: 26px;
+    font-weight: 900;
+    color: #5b311d;
+}
+
+.adv-panel-section-title {
+    margin: 10px 0 6px;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #a4632c;
+}
+
+.adv-goal-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.adv-goal-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: rgba(109, 63, 49, 0.1);
+    color: #4a2a15;
+    font-weight: 800;
+    font-size: 14px;
+}
+
+.adv-goal-label {
+    flex: 1 1 auto;
+    text-align: left;
+}
+
+.adv-goal-target {
+    font-weight: 900;
+    font-size: 16px;
+    color: #a4632c;
+}
+
+.adv-panel-moves,
+.adv-panel-score,
+.adv-panel-timer {
+    font-size: 18px;
+    font-weight: 900;
+    color: #5b311d;
+    margin-bottom: 8px;
+}
+
+.adv-panel-score {
+    font-size: 30px;
+    color: #e08a1e;
+}
+
+.adv-panel-hint,
+.adv-panel-reason {
+    margin-bottom: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #7a5136;
+    line-height: 1.35;
+}
+
+.adv-panel-reason {
+    font-size: 16px;
+    font-weight: 900;
+    color: #c0392b;
+}
+
+.adv-panel-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+.adv-cta {
+    flex: none;
+    width: 100%;
+    padding: 13px 16px;
+    font-size: 16px;
+    border-radius: 22px;
+    height: auto;
+}
+
+.adv-panel .btn-outline {
+    border-color: rgba(122, 63, 29, 0.5);
+    color: #7a3f1d;
+}
+
+.adv-panel .btn-outline:active {
+    background: rgba(122, 63, 29, 0.1);
+}
+
+/* Баннер целей при старте уровня + короткие тосты бустеров. */
+.adv-banner {
+    position: fixed;
+    left: 50%;
+    top: 38%;
+    transform: translate(-50%, -50%) scale(0.9);
+    z-index: 3300;
+    padding: 14px 26px;
+    border-radius: 22px;
+    background: linear-gradient(180deg, rgba(255, 246, 230, 0.97) 0%, rgba(246, 220, 182, 0.97) 100%);
+    border: 3px solid #9b6134;
+    box-shadow: 0 8px 24px rgba(20, 10, 4, 0.45);
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    max-width: min(86vw, 330px);
+}
+
+.adv-banner-show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.adv-banner-hide {
+    opacity: 0;
+    transform: translate(-50%, -80%) scale(0.94);
+}
+
+.adv-banner-level {
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #a4632c;
+}
+
+.adv-banner-name {
+    font-size: 22px;
+    font-weight: 900;
+    color: #5b311d;
+    margin-bottom: 6px;
+}
+
+.adv-banner-goal {
+    font-size: 14px;
+    font-weight: 800;
+    color: #4a2a15;
+}
+
+.adv-banner-hint {
+    margin-top: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #7a5136;
+}
+
+.adv-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 16%;
+    transform: translateX(-50%);
+    z-index: 3600;
+    padding: 10px 18px;
+    border-radius: 999px;
+    background: rgba(30, 14, 6, 0.9);
+    color: #fff4e0;
+    font-size: 14px;
+    font-weight: 800;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.adv-toast-hide {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
+}
+
+/* --- 5. Лидерборды -------------------------------------------------- */
+.lb-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 3700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(10, 5, 2, 0.66);
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    font-family: 'Nunito', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.lb-overlay.show {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.lb-panel {
+    width: min(100%, 360px);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    padding: 18px;
+    border-radius: 26px;
+    background: linear-gradient(180deg, #fff6e6 0%, #f6dcb6 100%);
+    border: 3px solid #9b6134;
+    box-shadow: 0 6px 0 #8a542d, 0 20px 40px rgba(20, 10, 4, 0.45);
+}
+
+.lb-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.lb-title {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 900;
+    color: #5b311d;
+}
+
+.lb-close {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(109, 63, 49, 0.16);
+    color: #5b311d;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.lb-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.lb-tab {
+    flex: 1 1 0;
+    padding: 8px 6px;
+    border-radius: 14px;
+    border: 2px solid rgba(122, 63, 29, 0.35);
+    background: transparent;
+    color: #7a5136;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.lb-tab-active {
+    background: linear-gradient(180deg, #f59e0b 0%, #ea7a10 100%);
+    border-color: #b45309;
+    color: #fff;
+}
+
+.lb-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-height: 120px;
+}
+
+.lb-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 10px;
+    border-radius: 12px;
+    background: rgba(109, 63, 49, 0.09);
+    color: #4a2a15;
+    font-weight: 800;
+    font-size: 14px;
+}
+
+.lb-row-self {
+    background: linear-gradient(90deg, rgba(255, 204, 0, 0.35) 0%, rgba(255, 204, 0, 0.16) 100%);
+    box-shadow: inset 0 0 0 2px rgba(224, 138, 30, 0.55);
+}
+
+.lb-rank {
+    min-width: 24px;
+    font-weight: 900;
+    color: #a4632c;
+}
+
+.lb-avatar {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background-color: rgba(109, 63, 49, 0.2);
+    background-size: cover;
+    background-position: center;
+}
+
+.lb-avatar-empty {
+    background-image: url('assets/theme/icons/icon-avatar-placeholder.png');
+    background-size: 20px 20px;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.lb-name {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
+
+.lb-score {
+    font-weight: 900;
+    color: #5b311d;
+}
+
+.lb-status {
+    padding: 22px 10px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 800;
+    color: #7a5136;
+}
+
+.lb-auth {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+    text-align: center;
+}
+
+.lb-auth-hint {
+    font-size: 13px;
+    font-weight: 800;
+    color: #7a5136;
+}
+
+.lb-action {
+    align-self: center;
+    padding: 10px 22px;
+    border: none;
+    border-radius: 20px;
+    background: linear-gradient(180deg, #f59e0b 0%, #ea7a10 100%);
+    box-shadow: 0 4px 0 #b45309;
+    color: #fff;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.lb-action:active {
+    transform: translateY(2px);
+    box-shadow: 0 2px 0 #b45309;
+}
+
+.settings-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    margin-top: 16px;
+}
+
+.settings-action-btn {
+    flex: none;
+    width: 100%;
+    padding: 12px 16px;
+    font-size: 15px;
+    border-radius: 20px;
+    height: auto;
+    border-color: rgba(51, 65, 85, 0.35);
+    color: #334155;
+}
+
+.settings-action-btn:active {
+    background: rgba(51, 65, 85, 0.08);
+}
+
+/* Компактные экраны: HUD и бустеры не должны съедать доску. */
+@media (max-height: 750px) {
+    .adventure-hud {
+        margin-top: 5px;
+        margin-bottom: -20px;
+        padding: 5px 10px 24px;
+        gap: 6px 8px;
+    }
+
+    .adv-booster {
+        width: 44px;
+        height: 44px;
+        border-radius: 14px;
+    }
+
+    .adv-booster-icon {
+        width: 24px;
+        height: 24px;
+    }
+
+    .adventure-boosters {
+        gap: 8px;
+    }
+
+    .adv-node {
+        width: 58px;
+        height: 58px;
+    }
+}
+
+/* Невысокие экраны — в том числе ландшафтные рельсы, где HUD живёт в узкой
+   левой колонке: размеры меньше «портретных», но всё равно крупнее исходных. */
+@media (max-height: 620px) {
+    .adventure-hud {
+        margin-top: 4px;
+        margin-bottom: -18px;
+        padding: 4px 9px 21px;
+        gap: 5px 7px;
+    }
+
+    .adventure-hud-level {
+        font-size: 15px;
+    }
+
+    .adventure-moves {
+        font-size: 20px;
+        padding: 1px 10px;
+    }
+
+    .adventure-moves::after {
+        width: 18px;
+        height: 18px;
+    }
+
+    .adv-chip {
+        font-size: 15px;
+        padding: 1px 9px 1px 5px;
+    }
+
+    .adv-chip-icon {
+        width: 21px;
+        height: 21px;
+    }
+}
+
+/* Ландшафт: трей превращается в вертикальную колонку справа, и четвёртый элемент
+   в неё по высоте уже не влезает. Выносим бустеры в свободный низ левой колонки
+   (координаты — относительно .game-container, он position: relative).
+   Блок держим последним в файле, чтобы он гарантированно перебивал правила
+   выше по каскаду при равной специфичности. */
+@media (orientation: landscape) and (max-height: 620px) {
+    .adventure-boosters {
+        position: absolute;
+        left: var(--landscape-container-pad-x);
+        bottom: var(--landscape-container-pad-y);
+        flex-direction: row;
+        justify-content: flex-start;
+        gap: 10px;
+        z-index: 6;
+    }
+
+    /* Левая колонка узкая: строка «УР. N + ходы + цели» в неё не влезала и
+       чипы целей обрезались по краю панели. Разрешаем перенос — вертикального
+       места в колонке достаточно. */
+    .adventure-hud {
+        flex-wrap: wrap;
+        row-gap: 5px;
+        /* Доски рядом нет — прятать нижнюю кромку не за что. */
+        margin-bottom: 0;
+        padding-bottom: 6px;
+    }
+
+    .adventure-goals {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        overflow: visible;
+        gap: 4px;
+    }
+
+    /* Колонка узкая (~130px): чипы такого размера ложатся по два в ряд, и даже
+       четыре цели не выдавливают HUD за пределы колонки. */
+    .adv-chip,
+    body.adv-goals-many .adv-chip {
+        font-size: 14px;
+        gap: 3px;
+        padding: 1px 7px 1px 4px;
+    }
+
+    .adv-chip-icon,
+    body.adv-goals-many .adv-chip-icon {
+        width: 18px;
+        height: 18px;
+    }
+
+    .adventure-hud-level {
+        font-size: 14px;
+    }
+}
+
