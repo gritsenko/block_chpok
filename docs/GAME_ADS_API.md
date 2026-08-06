@@ -49,12 +49,17 @@ Two things `Jam` does **not** cover, so they resolve elsewhere:
 <!-- your game -->
 ```
 
-`platform.js` is a self-contained IIFE. It defines `window.GameAds`
-synchronously and starts loading the Yandex SDK in the background (only when no
-other host was detected — a Jam host, native bridge or simulator all skip it).
-Order matters only if you query `GameAds.hasProvider()` during page load on
-Yandex — wait for `GameAds.whenYandexReady()` if you need synchronous certainty
-there.
+`platform.js` defines `window.GameAds` and `window.GamePlatform` synchronously,
+then lets at most one adapter load its host SDK in the background — and only when
+no other host answered at load (a Jam host, native bridge or simulator all skip
+it). Order matters only if you query `GameAds.hasProvider()` during page load on
+a host with an async SDK — await `GamePlatform.whenReady()` if you need
+synchronous certainty there.
+
+In this repo `platform.js` is built, not hand-written: `src/platform/core.js`
+holds the host-agnostic core and each host lives in its own adapter file, so a
+build ships only the adapters its target needs. Consumers see one file either
+way. See `AGENTS.md` -> "Build targets".
 
 You never add a `<script>` tag for the platform SDKs yourself. The jam portal
 inserts `jam-sdk.js` before your first script; rnd-lab's `build_service` inserts
@@ -112,22 +117,17 @@ is active).
 ## API reference
 
 ### `GameAds.platform: 'native' | 'web'`
-Set once at script load. `'native'` means a raw native bridge or localhost
-simulator was bound. `'web'` means anything else — including a Jam host, since
-that is not known at load time inside an APK. Prefer `provider()`.
+`'native'` means a raw native bridge or the localhost simulator is bound. `'web'`
+means anything else — including a Jam host, since that is not known at load time
+inside an APK. Prefer `provider()`, or `GamePlatform.isNativeShell()` if you need
+a synchronous "am I inside a native shell" answer at load.
 
-### `GameAds.provider(): 'jam' | 'hub' | 'native' | 'sim' | 'yandex' | 'none'`
+### `GameAds.provider(): 'jam' | 'gameads' | 'sim' | 'yandex' | 'none'`
 Which host would actually serve the next ad, evaluated on read. This is the
 resolution order every `show*` follows.
 
 ### `GameAds.hasProvider(): boolean`
 True if any provider can actually show ads right now.
-
-### `GameAds.whenYandexReady(): Promise<boolean>`
-Resolves with `true` once Yandex SDK has loaded, `false` if we skipped it
-(native shell / localhost) or it failed to load. Useful if you need to call
-`window.YandexSDK.*` directly (leaderboards, game lifecycle) — but for ads you
-don't need this.
 
 ---
 
@@ -227,6 +227,43 @@ Project/game id. Useful for namespacing your own `localStorage`.
 
 ---
 
+## `window.GamePlatform` — everything that is not an ad
+
+Second facade, same file, same rules: every method answers on every build. No host
+means a no-op, `false`, or `null` — never a throw, never a hang. Game code uses
+this instead of touching a host SDK, which is what keeps a build free of foreign
+platform names.
+
+| Method | Returns | No host |
+|---|---|---|
+| `whenReady()` | `Promise<boolean>` — host SDK loaded **and** initialised | resolves `false` immediately |
+| `getLanguage()` | language tag, **synchronously** (`?lang=` → host → `navigator.language`) | `navigator.language` |
+| `gameReady()` | `boolean` — host told the game finished loading | `true` |
+| `startGameplay()` / `stopGameplay()` | `boolean` — did a host take the call | `false` |
+| `onPause(fn)` / `onResume(fn)` | unsubscribe function | no-op unsubscribe |
+| `isPaused()` | `boolean` | `false` |
+| `saveBestScore(n)` | `Promise<boolean>` | `false` |
+| `getBestScore()` | `Promise<number \| null>` | **`null`** |
+| `reportEvent(name, params?)` | `boolean` — a host claimed the event | `false` |
+| `isNativeShell()` | `boolean`, **synchronously** at load | `false` |
+
+Two contracts worth stating explicitly, because getting them wrong is silent:
+
+**`getBestScore()` returns `null`, not `0`, when the host has no cloud store.** `0`
+is a real stored score. Never write anything back on `null` — doing so pushes a
+score to a leaderboard API on every session start, and portals rate-limit submits.
+
+**`reportEvent` is not `GameAds.logEvent`.** `reportEvent` carries events the *host
+itself* requires and is mapped per host: on Yandex `game_start` and `level_complete`
+become `dispatchYandexEvent` calls; on a portal host it is a deliberate no-op,
+because the portal mints `level_complete` itself and reserves the name. Product
+telemetry and the progress funnel go through `GameAds.logEvent` /
+`GameAds.levelComplete`, which fire at different moments — in Classic the funnel
+steps are score milestones during the run, while the host's `level_complete` is one
+event at game over. Do not collapse the two.
+
+---
+
 ## Status code reference
 
 Every error/close result carries a `status`. Full set:
@@ -303,7 +340,6 @@ runs:
         platform: 'web',
         provider: () => 'jam',
         hasProvider: () => true,
-        whenYandexReady: () => Promise.resolve(false),
         showRewarded: (cb) => { cb.onOpen?.(); cb.onReward?.(); cb.onClose?.(true); },
         showInterstitial: (cb) => { cb.onOpen?.(); cb.onClose?.(true); },
         isRewardedReady: () => true,

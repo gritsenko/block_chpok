@@ -177,6 +177,7 @@
     let mapNodesEl = null;
     let mapHeartsEl = null;
     let mapStarsEl = null;
+    let mapLeaderboardBtn = null;
     // Фон карты: два слоя, между которыми идёт кроссфейд при прокрутке к новой главе.
     let mapBgLayers = [];
     let mapBgTop = 0;
@@ -709,13 +710,14 @@
             core().refreshSplashSubtitles();
         }
 
-        // Прогресс воронки для JAM/RewardHub — один вызов на пройденный уровень.
+        // Два разных канала, и здесь — единственное место, где момент у них совпадает:
+        // портальная воронка прогресса и событие, которого требует сам хост.
         if (window.GameAds && typeof window.GameAds.levelComplete === 'function') {
             window.GameAds.levelComplete(levelId, { stars: stars, score: score });
         }
 
-        if (window.YandexSDK && window.YandexSDK.isAvailable()) {
-            window.YandexSDK.dispatchLevelCompleteEvent(levelId);
+        if (window.GamePlatform) {
+            window.GamePlatform.reportEvent('level_complete', { level: levelId });
         }
 
         showWinModal(levelId, stars, score);
@@ -1099,6 +1101,22 @@
         }, 2200);
     }
 
+    // Трофей на карте ведёт в модалку рейтинга, которой в сборке без лидербордов нет.
+    // Ядро дёргает это через window.Adventure.syncLeaderboardButton, когда доступность
+    // хоста меняется; аргумент необязателен, чтобы кнопка могла проверить себя сама.
+    function syncLeaderboardButton(available) {
+        if (!mapLeaderboardBtn) return;
+
+        const canShow = (typeof available === 'boolean')
+            ? available
+            : !!(window.GameLeaderboards
+                && typeof window.GameLeaderboards.isAvailable === 'function'
+                && window.GameLeaderboards.isAvailable()
+                && typeof window.GameLeaderboards.openUi === 'function');
+
+        mapLeaderboardBtn.hidden = !canShow;
+    }
+
     // ------------------------------------------------------------------
     // UI: карта уровней
     // ------------------------------------------------------------------
@@ -1129,10 +1147,14 @@
         // Иконка кнопки — фон из CSS (assets/theme/icons/icon-trophy.png), поэтому
         // текстовой метки нет и подпись живёт в aria-label.
         const leaderboardBtn = button('adv-icon-btn adv-lb-btn', '', () => {
-            if (window.GameLeaderboards) window.GameLeaderboards.openUi('adventure');
+            if (window.GameLeaderboards && typeof window.GameLeaderboards.openUi === 'function') {
+                window.GameLeaderboards.openUi('adventure');
+            }
         });
         leaderboardBtn.setAttribute('aria-label', text().leaderboard);
         top.appendChild(leaderboardBtn);
+        mapLeaderboardBtn = leaderboardBtn;
+        syncLeaderboardButton();
 
         mapEl.appendChild(top);
 
@@ -1773,6 +1795,7 @@
         applyLanguage: applyLanguage,
         isUiOpen: () => isMapOpen() || isModalOpen(),
         validateLevels: validateLevels,
+        syncLeaderboardButton: syncLeaderboardButton,
 
         // Хуки ядра (game.js -> adventureHook)
         onPlacement: onPlacement,

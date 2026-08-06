@@ -12,13 +12,24 @@
     <meta property="og:url" content="https://gritsenko.biz/block_chpok/">
     <meta name="twitter:card" content="summary_large_image">
 
-    <!-- Platform facade: detects the native ads bridge and lazily loads the
-         Yandex Games SDK only when no native bridge is present. -->
-    <script src="platform.js"></script>
+    <!-- build:platform -->
+    <!-- Platform facade: host-agnostic core plus one self-registering adapter per host.
+         The core detects which host is actually present and only then lets that adapter
+         load its SDK, so a build never touches a network it does not belong to.
+         Order is load-bearing: the decision to fetch an external SDK is taken from
+         "did anyone answer already", so the simulator must register before any adapter
+         that fetches one. The build collapses this block into a single platform.js. -->
+    <script src="platform/core.js"></script>
+    <script src="platform/gameads.js"></script>
+    <script src="platform/jam.js"></script>
+    <script src="platform/sim.js"></script>
+    <script src="platform/yandex.js"></script>
+    <!-- /build:platform -->
 
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css">
 
+    <!-- build:only web,yandex -->
     <!-- Yandex.Metrika counter -->
     <script type="text/javascript">
         (function (m, e, t, r, i, k, a) {
@@ -38,6 +49,7 @@
         <div><img src="https://mc.yandex.ru/watch/98653129" style="position:absolute; left:-9999px;" alt=""></div>
     </noscript>
     <!-- /Yandex.Metrika counter -->
+    <!-- /build:only -->
 </head>
 <body>
 
@@ -174,7 +186,12 @@
      Все три должны загрузиться ДО game.js: на старте он читает window.Adventure,
      чтобы решить, показывать ли кнопку режима. -->
 <script src="levels.js"></script>
-<script src="leaderboards.js"></script>
+<!-- build:leaderboards -->
+<script src="leaderboards/core.js"></script>
+<script src="leaderboards/ui.js"></script>
+<script src="leaderboards/jam.js"></script>
+<script src="leaderboards/yandex.js"></script>
+<!-- /build:leaderboards -->
 <script src="adventure.js"></script>
 <script src="game.js"></script>
 </body>
