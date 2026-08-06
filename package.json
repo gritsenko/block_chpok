@@ -8,7 +8,11 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "node scripts/build.mjs --target=web",
+    "build:yandex": "node scripts/build.mjs --target=yandex",
+    "build:gameads": "node scripts/build.mjs --target=gameads",
+    "build:jam": "node scripts/build.mjs --target=jam",
+    "build:all": "npm run build:yandex && npm run build:gameads && npm run build:jam",
     "clean": "node scripts/build.mjs --clean"
   }
 }

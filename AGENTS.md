@@ -6,7 +6,8 @@ Guidance for autonomous coding agents working in this repository.
 
 - Project type: static browser game (no bundler, no framework, no package manager files).
 - Runtime: modern desktop/mobile browser.
-- Sources live in `src/`, publish output in `dist/` (`npm run build` copies src -> dist and zips).
+- Sources live in `src/`. `npm run build` publishes the public web target to `dist/`; the three
+  platform targets go to `build/<target>/`. See "Build targets" below.
 - Entry point: `src/index.html`.
 - Core logic: `src/game.js` (board, drag, line clears, obstacle layer, mode routing).
 - Styling: `src/styles.css`.
@@ -18,8 +19,8 @@ Guidance for autonomous coding agents working in this repository.
 - **Adventure** — levels with goals, a move limit, obstacles, hearts and boosters.
   - `src/levels.js` — level DATA only (40 levels). This is the file designers edit.
   - `src/adventure.js` — progression, goals, stars, hearts, boosters, all mode UI.
-  - `src/leaderboards.js` — leaderboard facade (Yandex now, jam-sdk when it ships) + its modal.
-  - Script order in `index.html` matters: `levels.js` -> `leaderboards.js` -> `adventure.js` -> `game.js`.
+  - `src/leaderboards/` — leaderboard facade + its modal, split per host (see below).
+  - Script order in `index.html` matters: `levels.js` -> `leaderboards/*` -> `adventure.js` -> `game.js`.
   - The core knows nothing about goals or progress: it talks down through `window.GameCore`
     and up through `window.Adventure` hooks (`onPlacement` fires once per move, after
     line clears resolve). Keep that boundary — do not read adventure state from `game.js`.
@@ -33,16 +34,47 @@ Guidance for autonomous coding agents working in this repository.
 
 ## Commands (Build/Lint/Test)
 
-This repo currently has **no configured build, lint, or automated test scripts**.
+This repo has **no lint or automated test scripts**. It does have a build step (below).
 
 ### Run locally
 
 - it served by vs code lite server on http://localhost:3000
+- `src/` is directly runnable: `index.html` loads every platform adapter, and each one
+  detects whether its host is actually present. No build needed to develop.
 
-### Build
+### Build targets
 
-- No build step is required.
-- Treat "build" as "files load without console/runtime errors in browser".
+`node scripts/build.mjs --target=<t>` copies `src/`, concatenates the platform and
+leaderboard parts each target needs into a single `platform.js` / `leaderboards.js`,
+resolves the marker blocks in `index.html`, runs the token gate and zips the result.
+
+| Command | Target | Host | Leaderboards | Output |
+|---|---|---|---|---|
+| `npm run build` | `web` | public site | no host | `dist/` |
+| `npm run build:yandex` | `yandex` | Yandex Games | Yandex | `build/yandex/` |
+| `npm run build:gameads` | `gameads` | native APK shell | **none** | `build/gameads/` |
+| `npm run build:jam` | `jam` | MY.GAMES JAM portal | portal | `build/jam/` |
+| `npm run build:all` | all three platform targets | | | `build/` |
+
+Rules that are easy to break:
+
+- **`dist/` must stay the `web` target.** `.github/workflows/static.yml` publishes the
+  committed `./dist` as the GitHub Pages root on every push to `main`, with no build step.
+  Never point a platform target at `dist/`. `build/` is gitignored.
+- **The token gate is the guarantee, not the review.** Each target declares forbidden
+  strings (a foreign host's name, a foreign analytics domain); the build FAILS and names
+  file, line and token. Comments count — nothing is minified. `pixi.min.js` is exempt.
+- **Game code must not name any platform.** `game.js`, `adventure.js` and `levels.js` talk
+  only to `window.GameAds`, `window.GamePlatform` and `window.GameLeaderboards`. Adding an
+  `if (window.SomeSDK)` there breaks every build via the gate — put it in an adapter.
+- Adding a host means adding `src/platform/<host>.js` (+ optional
+  `src/leaderboards/<host>.js`), a `<script>` line inside the `build:platform` marker block,
+  and a manifest entry. `core.js` never learns about it.
+- Do not name files `ads-bridge.js`, `rewardhub-sdk.js` or `jam-compat.js`: the APK build
+  service skips any file the game already ships under those names, which would leave that
+  build with no SDK at all.
+
+- Beyond the gate, treat "build" as "files load without console/runtime errors in browser".
 
 ### Lint
 

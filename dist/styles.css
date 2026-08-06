@@ -712,6 +712,12 @@ body.low-perf-effects .block-item:not(.no-pop) {
     transition: transform 0.1s, box-shadow 0.1s;
 }
 
+/* См. .adv-icon-btn[hidden]: display у класса сильнее браузерного [hidden], а на кнопках
+   рейтинга скрытие — единственный способ убрать вход в UI, которого в сборке нет. */
+.btn[hidden] {
+    display: none;
+}
+
 .btn:active {
     transform: translateY(3px);
     box-shadow: 0 2px 0 rgba(0, 0, 0, 0.15), inset 0 2px 4px rgba(255, 255, 255, 0.3);
@@ -2063,6 +2069,12 @@ body.adv-goals-many .adv-chip-icon {
 
 .adv-icon-btn:active {
     transform: translateY(2px);
+}
+
+/* Собственный display перебивает браузерное правило для [hidden], поэтому скрытие
+   задаём явно: иначе трофей рейтинга остаётся на карте в сборке, где рейтинга нет. */
+.adv-icon-btn[hidden] {
+    display: none;
 }
 
 /* Стрелка «назад» — SVG-шеврон вместо глифа «‹»: у типографского символа своя

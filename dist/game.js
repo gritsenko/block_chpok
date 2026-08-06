@@ -681,8 +681,8 @@ if (document.readyState === 'complete') {
 
 // --- НАСТРОЙКИ И ДАННЫЕ ---
 const BOARD_SIZE = 8;
-// Прогресс для Jam/RewardHub: уровней в игре нет, поэтому роль ступеней воронки играют
-// пороги счёта — levelComplete это «насколько далеко дошёл игрок» для портала.
+// Прогресс для портальной воронки: уровней в классике нет, поэтому роль ступеней играют
+// пороги счёта — levelComplete это «насколько далеко дошёл игрок».
 // Список намеренно короткий и статичный: число уникальных имён событий на проект
 // ограничено на сервере, а динамические имена туда лучше не отправлять вообще.
 const SCORE_MILESTONES = [500, 1000, 2500, 5000, 10000, 25000];
@@ -827,10 +827,13 @@ function resolveRendererPreference() {
         const stored = window.localStorage.getItem('renderer_pref');
         if (stored === 'dom' || stored === 'pixi') return stored;
     } catch (e) { /* ignore */ }
-    // Дефолт по платформе: на РЕАЛЬНОМ нативном мосту APK (window.AdsBridge) держим DOM до
-    // валидации WebView. Localhost-симулятор, веб и Яндекс -> Pixi по умолчанию.
-    const hasNativeBridge = !!(window.AdsBridge && typeof window.AdsBridge.showRewarded === 'function');
-    if (hasNativeBridge) return 'dom';
+    // Дефолт по платформе: под РЕАЛЬНЫМ нативным шеллом держим DOM до валидации WebView.
+    // Ответ нужен синхронно, здесь и сейчас, поэтому спрашиваем фасад, а не провайдера:
+    // localhost-симулятор, веб и порталы -> Pixi по умолчанию.
+    const nativeShell = !!(window.GamePlatform
+        && typeof window.GamePlatform.isNativeShell === 'function'
+        && window.GamePlatform.isNativeShell());
+    if (nativeShell) return 'dom';
     return 'pixi';
 }
 const RENDERER_PREFERENCE = resolveRendererPreference();
@@ -969,18 +972,18 @@ function readDebugLanguageOverride() {
 
 
 let currentLanguage = readDebugLanguageOverride()
-    || ((window.YandexSDK && typeof window.YandexSDK.getLanguage === 'function')
-        ? window.YandexSDK.getLanguage()
+    || ((window.GamePlatform && typeof window.GamePlatform.getLanguage === 'function')
+        ? window.GamePlatform.getLanguage()
         : (typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE));
 let isSoundEnabled = readStoredBoolean(SOUND_ENABLED_KEY, readStoredBoolean(LEGACY_MUSIC_ENABLED_KEY, true));
 let hasGameStarted = false;
 let isGameOverSequenceActive = false;
 let isGameplayPausedBySdk = false;
 let isGameplayMarkedActive = false;
-let hasBoundYandexLifecycle = false;
-let yandexLifecycleInitPromise = null;
+let hasBoundPlatformLifecycle = false;
+let platformLifecycleInitPromise = null;
 let languageReadyPromise = null;
-let hasRequestedYandexGameReady = false;
+let hasRequestedPlatformGameReady = false;
 let isSplashPlayEnabled = false;
 let hasUsedSecondChance = false;
 let reachedMilestones = 0;
@@ -1283,6 +1286,7 @@ function applyTranslations(language) {
     if (splashLeaderboardBtn) splashLeaderboardBtn.textContent = messages.leaderboardTitle;
     if (menuBtn) menuBtn.textContent = messages.backToMenu;
     if (settingsLeaderboardBtn) settingsLeaderboardBtn.textContent = messages.leaderboardTitle;
+    syncLeaderboardEntryPoints();
     refreshSplashSubtitles();
 
     gameOverTitleEl.textContent = messages.gameOverTitle;
@@ -1425,9 +1429,9 @@ function clearPendingGameOver() {
 
 function shouldGameplayBeActive() {
     // Gameplay must only be active during real play — not while the splash/Play
-    // button is still shown. Yandex's "Gameplay is active" indicator otherwise
-    // turns green before the player ever presses Play (requirement: GameplayAPI.start
-    // fires on actual gameplay start, not on the menu screen).
+    // button is still shown. The host's "gameplay is active" indicator otherwise
+    // turns green before the player ever presses Play (platform requirement: the
+    // gameplay-start signal fires on actual gameplay, not on the menu screen).
     return hasGameStarted
         && !settingsModal.classList.contains('show')
         && !gameOverScreen.classList.contains('show')
@@ -1441,7 +1445,7 @@ function shouldGameplayBeActive() {
 function syncGameplayState() {
     const shouldBeActive = shouldGameplayBeActive();
 
-    if (!window.YandexSDK || !window.YandexSDK.isAvailable || !window.YandexSDK.isAvailable()) {
+    if (!window.GamePlatform) {
         isGameplayMarkedActive = false;
         return;
     }
@@ -1450,16 +1454,16 @@ function syncGameplayState() {
         return;
     }
 
-    isGameplayMarkedActive = shouldBeActive;
+    // The facade reports whether a host actually took the call, so no separate
+    // availability probe is needed: no host means the flag simply stays false.
+    const accepted = shouldBeActive
+        ? window.GamePlatform.startGameplay()
+        : window.GamePlatform.stopGameplay();
 
-    if (shouldBeActive) {
-        window.YandexSDK.startGameplay();
-    } else {
-        window.YandexSDK.stopGameplay();
-    }
+    isGameplayMarkedActive = accepted ? shouldBeActive : false;
 }
 
-function handleYandexPause() {
+function handlePlatformPause() {
     isGameplayPausedBySdk = true;
 
     if (isDragging) {
@@ -1474,7 +1478,7 @@ function handleYandexPause() {
     syncGameplayState();
 }
 
-function handleYandexResume() {
+function handlePlatformResume() {
     isGameplayPausedBySdk = false;
 
     if (hasGameStarted) {
@@ -1488,81 +1492,70 @@ function handleYandexResume() {
     syncGameplayState();
 }
 
-async function initializeYandexLifecycle() {
-    if (hasBoundYandexLifecycle) {
+async function initializePlatformLifecycle() {
+    if (hasBoundPlatformLifecycle) {
         syncGameplayState();
         return;
     }
 
-    if (yandexLifecycleInitPromise) {
-        return yandexLifecycleInitPromise;
+    if (platformLifecycleInitPromise) {
+        return platformLifecycleInitPromise;
     }
 
-    yandexLifecycleInitPromise = (async () => {
+    platformLifecycleInitPromise = (async () => {
         try {
-            // Yandex SDK is loaded on demand by platform.js — wait for it first.
-            if (window.GameAds && typeof window.GameAds.whenYandexReady === 'function') {
-                await window.GameAds.whenYandexReady();
-            }
-
-            if (!window.YandexSDK || typeof window.YandexSDK.init !== 'function') {
+            if (!window.GamePlatform) {
                 return;
             }
 
-            await window.YandexSDK.init();
-            hasBoundYandexLifecycle = true;
+            // The host SDK is loaded and initialised by platform.js — whenReady() covers
+            // both, so there is nothing to init here and nothing to poll for.
+            await window.GamePlatform.whenReady();
 
-            if (typeof window.YandexSDK.onPause === 'function') {
-                window.YandexSDK.onPause(handleYandexPause);
-            }
+            hasBoundPlatformLifecycle = true;
+            window.GamePlatform.onPause(handlePlatformPause);
+            window.GamePlatform.onResume(handlePlatformResume);
 
-            if (typeof window.YandexSDK.onResume === 'function') {
-                window.YandexSDK.onResume(handleYandexResume);
-            }
-
-            if (typeof window.YandexSDK.isPaused === 'function' && window.YandexSDK.isPaused()) {
-                handleYandexPause();
+            if (window.GamePlatform.isPaused()) {
+                handlePlatformPause();
             } else {
                 syncGameplayState();
             }
         } catch (error) {
-            console.warn('Failed to initialize Yandex lifecycle:', error);
+            console.warn('Failed to initialize platform lifecycle:', error);
         } finally {
-            yandexLifecycleInitPromise = null;
+            platformLifecycleInitPromise = null;
         }
     })();
 
-    return yandexLifecycleInitPromise;
+    return platformLifecycleInitPromise;
 }
 
-async function notifyYandexGameReadyForSplash() {
-    // Intentionally NOT gated on isSplashPlayEnabled: LoadingAPI.ready() must be sent
-    // while Play is still disabled, so GameReady fires before the game is playable
-    // (platform requirement 1.19). See prepareSplashPlayForYandex for the ordering.
-    if (hasRequestedYandexGameReady || hasGameStarted || !splashOverlay) {
+async function notifyGameReadyForSplash() {
+    // Intentionally NOT gated on isSplashPlayEnabled: the "game loaded" signal must be
+    // sent while Play is still disabled, so the host sees it before the game is playable
+    // (platform requirement 1.19). See prepareSplashPlay for the ordering.
+    if (hasRequestedPlatformGameReady || hasGameStarted || !splashOverlay) {
         return;
     }
 
-    hasRequestedYandexGameReady = true;
+    hasRequestedPlatformGameReady = true;
 
-    const trySend = () => {
-        if (!window.YandexSDK || typeof window.YandexSDK.gameReady !== 'function') {
-            return false;
-        }
-        return window.YandexSDK.gameReady();
-    };
-
-    if (trySend()) {
+    if (!window.GamePlatform) {
         return;
     }
 
     try {
-        if (window.GameAds && typeof window.GameAds.whenYandexReady === 'function') {
-            await window.GameAds.whenYandexReady();
-            trySend();
+        // Send once eagerly — a host that is already up accepts it right away and the
+        // facade replays an early request after its own init if it is not.
+        if (window.GamePlatform.gameReady()) {
+            return;
         }
+
+        await window.GamePlatform.whenReady();
+        window.GamePlatform.gameReady();
     } catch (error) {
-        console.warn('Failed to notify Yandex LoadingAPI.ready at splash:', error);
+        console.warn('Failed to signal game-ready at splash:', error);
     }
 }
 
@@ -1582,6 +1575,34 @@ function setSplashPlayEnabled(enabled) {
     if (isSplashPlayEnabled) {
         refreshSplashSubtitles();
         updateSplashPlayButtonPosition();
+    }
+}
+
+// Есть ли вообще куда вести игрока по кнопке рейтинга. В сборке без лидербордов фасад
+// отвечает false и модалки не существует — значит и входов в неё быть не должно, иначе
+// игрок жмёт кнопку, которая ничего не делает.
+function canShowLeaderboard() {
+    return !!(window.GameLeaderboards
+        && typeof window.GameLeaderboards.isAvailable === 'function'
+        && window.GameLeaderboards.isAvailable()
+        && typeof window.GameLeaderboards.openUi === 'function');
+}
+
+// Доступность может появиться позже, когда хост доинициализируется, поэтому пересчёт
+// висит на applyTranslations (её дёргает и whenReady) и на открытии настроек.
+function syncLeaderboardEntryPoints() {
+    const available = canShowLeaderboard();
+
+    if (splashLeaderboardBtn) {
+        splashLeaderboardBtn.hidden = !available;
+    }
+
+    if (settingsLeaderboardBtn) {
+        settingsLeaderboardBtn.hidden = !available;
+    }
+
+    if (window.Adventure && typeof window.Adventure.syncLeaderboardButton === 'function') {
+        window.Adventure.syncLeaderboardButton(available);
     }
 }
 
@@ -1609,10 +1630,7 @@ function refreshSplashSubtitles() {
             : messages.adventureSub;
     }
 
-    if (splashLeaderboardBtn) {
-        const canShowLeaderboard = !!(window.GameLeaderboards && window.GameLeaderboards.isAvailable());
-        splashLeaderboardBtn.hidden = !canShowLeaderboard;
-    }
+    syncLeaderboardEntryPoints();
 }
 
 function setInputLocked(locked) {
@@ -1623,19 +1641,19 @@ function setInputLocked(locked) {
     syncGameplayState();
 }
 
-async function prepareSplashPlayForYandex() {
+async function prepareSplashPlay() {
     // Order matters and enforces two platform requirements:
     //   1. Keep Play hidden until the SDK language is applied, so the whole UI appears
     //      in the correct language from the first frame (requirement 2.14).
-    //   2. Dispatch LoadingAPI.ready() BEFORE enabling Play, so the player can never
-    //      start the game before GameReady fires (requirement 1.19). The splash start
-    //      handler is gated on isSplashPlayEnabled, so a disabled button = not playable.
+    //   2. Signal "game loaded" BEFORE enabling Play, so the player can never start the
+    //      game before the host has seen it (requirement 1.19). The splash start handler
+    //      is gated on isSplashPlayEnabled, so a disabled button = not playable.
     setSplashPlayEnabled(false);
 
     try {
         await whenLanguageReady();
         // Tell the platform the game is fully loaded BEFORE making Play interactive.
-        await notifyYandexGameReadyForSplash();
+        await notifyGameReadyForSplash();
     } catch (error) {
         console.warn('Failed to prepare splash Play button:', error);
     } finally {
@@ -1656,6 +1674,7 @@ function openSettingsModal() {
     settingsModal.classList.add('show');
     settingsModal.setAttribute('aria-hidden', 'false');
     syncSoundToggleUI();
+    syncLeaderboardEntryPoints();
     syncGameplayState();
 }
 
@@ -1672,29 +1691,23 @@ async function initializeLanguage() {
         return;
     }
 
-    // Show something immediately (browser language) while the SDK loads. On Yandex this
-    // stays hidden behind the platform loader until LoadingAPI.ready() fires, so the user
-    // never sees the pre-SDK language.
+    // Show something immediately (browser language) while the host SDK loads. Where a
+    // platform loader is involved this stays hidden behind it until the game-ready signal
+    // fires, so the user never sees the pre-SDK language.
     const initialLang = typeof navigator !== 'undefined' ? navigator.language : DEFAULT_LANGUAGE;
     applyTranslations(initialLang);
 
-    // The Yandex SDK is loaded lazily by platform.js — wait for that to settle, then init
-    // the SDK and switch to the language it reports (requirement 2.14: auto-detect via SDK).
-    if (window.GameAds && typeof window.GameAds.whenYandexReady === 'function') {
-        await window.GameAds.whenYandexReady();
-    }
-
-    if (!window.YandexSDK || typeof window.YandexSDK.init !== 'function') {
+    if (!window.GamePlatform) {
         return;
     }
 
+    // The host SDK is loaded and initialised by platform.js — wait for that, then switch
+    // to the language it reports (requirement 2.14: auto-detect via SDK).
     try {
-        await window.YandexSDK.init();
-        if (window.YandexSDK.isAvailable() && typeof window.YandexSDK.getLanguage === 'function') {
-            applyTranslations(window.YandexSDK.getLanguage());
-        }
+        await window.GamePlatform.whenReady();
+        applyTranslations(window.GamePlatform.getLanguage());
     } catch (error) {
-        console.warn('Failed to resolve Yandex language:', error);
+        console.warn('Failed to resolve platform language:', error);
     }
 }
 
@@ -1729,10 +1742,10 @@ function saveBestScore(nextBestScore) {
     }
     updateBestScoreDisplay();
 
-    // Статистика игрока остаётся на Yandex SDK, а лидерборд идёт через фасад
-    // GameLeaderboards (Yandex сейчас, jam-sdk — когда добавят методы).
-    if (window.YandexSDK && window.YandexSDK.isAvailable()) {
-        window.YandexSDK.saveBestScore(bestScore);
+    // Личная статистика игрока идёт в облачный стор хоста, а рейтинг — через фасад
+    // GameLeaderboards. Оба тихо ничего не делают там, где хост их не предоставляет.
+    if (window.GamePlatform) {
+        void window.GamePlatform.saveBestScore(bestScore);
     }
 
     if (window.GameLeaderboards) {
@@ -1787,8 +1800,10 @@ function revealGameOverScreen() {
         second_chance: hasUsedSecondChance ? 1 : 0,
     });
 
-    if (window.YandexSDK && window.YandexSDK.isAvailable()) {
-        window.YandexSDK.dispatchLevelCompleteEvent(1);
+    // Событие, которого требует сам хост: у классики «уровень» один — вся партия.
+    // Воронку вех счёта несёт reportScoreMilestones через GameAds, это другой канал.
+    if (window.GamePlatform) {
+        window.GamePlatform.reportEvent('level_complete', { level: 1 });
     }
 }
 
@@ -3426,8 +3441,8 @@ function createLandingParticles(x, y, colorStr, particleType = 'landing') {
 }
 
 // Единая точка отправки игровых событий. Отвечает только тот хост, у которого есть
-// приёмник (window.Jam на портале JAM / RewardHub в APK) — на Яндексе и в браузере
-// вызов молча ничего не делает, поэтому обёртки на местах вызова не нужны.
+// приёмник для продуктовой телеметрии — там, где его нет, вызов молча ничего не делает,
+// поэтому обёртки на местах вызова не нужны.
 function trackEvent(name, params) {
     if (window.GameAds && typeof window.GameAds.logEvent === 'function') {
         window.GameAds.logEvent(name, params);
@@ -3537,30 +3552,39 @@ applyTranslations(currentLanguage);
 loadBestScore();
 syncSoundToggleUI();
 void whenLanguageReady();
-void initializeYandexLifecycle();
-void prepareSplashPlayForYandex();
+void initializePlatformLifecycle();
+void prepareSplashPlay();
 
-async function syncBestScoreWithYandex() {
-    if (window.YandexSDK && window.YandexSDK.isAvailable()) {
-        try {
-            const currentLocal = bestScore || 0;
-            const yaScore = await window.YandexSDK.getBestScore();
+async function syncBestScoreWithPlatform() {
+    if (!window.GamePlatform) {
+        return;
+    }
 
-            if (typeof yaScore === 'number' && yaScore > currentLocal) {
-                bestScore = yaScore;
-                try {
-                    window.localStorage.setItem(BEST_SCORE_KEY, String(bestScore));
-                } catch (e) { }
-                updateBestScoreDisplay();
-            } else if (currentLocal > (yaScore || 0)) {
-                window.YandexSDK.saveBestScore(currentLocal);
-                if (window.GameLeaderboards) {
-                    window.GameLeaderboards.submit('endless', currentLocal);
-                }
-            }
-        } catch (e) {
-            console.warn('Error syncing Yandex score:', e);
+    try {
+        const currentLocal = bestScore || 0;
+        const cloudScore = await window.GamePlatform.getBestScore();
+
+        // null — у хоста нет облачного стора (в отличие от 0, который является настоящим
+        // сохранённым результатом). Писать некуда, и рейтинг трогать нельзя: иначе на каждом
+        // старте партии улетал бы лишний submit в API с его лимитом на сабмиты.
+        if (cloudScore === null) {
+            return;
         }
+
+        if (cloudScore > currentLocal) {
+            bestScore = cloudScore;
+            try {
+                window.localStorage.setItem(BEST_SCORE_KEY, String(bestScore));
+            } catch (e) { }
+            updateBestScoreDisplay();
+        } else if (currentLocal > cloudScore) {
+            void window.GamePlatform.saveBestScore(currentLocal);
+            if (window.GameLeaderboards) {
+                window.GameLeaderboards.submit('endless', currentLocal);
+            }
+        }
+    } catch (e) {
+        console.warn('Error syncing cloud best score:', e);
     }
 }
 
@@ -3593,29 +3617,24 @@ async function startGame(options) {
     }
     initGame();
     syncGameplayState();
-    void initializeYandexLifecycle();
+    void initializePlatformLifecycle();
 
-    if (window.YandexSDK) {
-        if (window.YandexSDK.isAvailable()) {
-            window.YandexSDK.dispatchGameStartEvent();
-            syncGameplayState();
-        } else {
-            // Ждем инициализации
-            setTimeout(() => {
-                if (window.YandexSDK.isAvailable()) {
-                    window.YandexSDK.dispatchGameStartEvent();
-                    syncGameplayState();
-                }
-            }, 1000);
+    // Хост-события и облачный рекорд не должны задерживать старт партии — ждём готовность
+    // платформы в фоне. whenReady() уже включает init хоста, поэтому ретраи по таймеру,
+    // которые здесь стояли раньше, больше не нужны.
+    void (async () => {
+        if (!window.GamePlatform) {
+            return;
         }
+
+        await window.GamePlatform.whenReady();
+        window.GamePlatform.reportEvent('game_start');
+        syncGameplayState();
 
         if (nextMode === MODE_ENDLESS) {
-            // Синхронизируем рекорды с небольшой задержкой, чтобы SDK точно успело загрузить данные
-            setTimeout(syncBestScoreWithYandex, 500);
-            // Запросим еще раз чуть позже на случай долгой инициализации SDK
-            setTimeout(syncBestScoreWithYandex, 2500);
+            await syncBestScoreWithPlatform();
         }
-    }
+    })();
 }
 
 // Возврат на стартовый экран выбора режима (из настроек или с карты приключения).
