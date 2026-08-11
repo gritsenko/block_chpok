@@ -73,6 +73,14 @@ Rules that are easy to break:
 - Do not name files `ads-bridge.js`, `rewardhub-sdk.js` or `jam-compat.js`: the APK build
   service skips any file the game already ships under those names, which would leave that
   build with no SDK at all.
+- **The archive is written by `writeZip()` in `build.mjs`, not by a shell-out.** It used to
+  run `tar -a -c -f x.zip *`, which picks the format from the extension only under bsdtar.
+  Windows' built-in `tar.exe` is bsdtar and produced a real zip; the GNU tar on PATH in Git
+  Bash / MSYS / Linux ignored `.zip` and wrote a **TAR archive named .zip**. The build printed
+  success either way, and the RnD portal rejected the upload with "not a valid .zip archive".
+  Do not reintroduce a shell-out. Entries are sorted and timestamps pinned to the DOS epoch so
+  the same sources give byte-identical bytes — the portal stores web builds content-addressed
+  by sha256, so rebuilding unchanged sources dedupes instead of piling up near-identical blobs.
 
 - Beyond the gate, treat "build" as "files load without console/runtime errors in browser".
 

@@ -15,10 +15,10 @@
  * keep writing exactly there and keep its file list unchanged; the three platform targets
  * only ever write under build/ (git-ignored).
  */
-import { execSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deflateRawSync } from 'node:zlib';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDir = resolve(rootDir, 'src');
@@ -124,6 +124,124 @@ function collectFiles(dirPath, found = []) {
     }
 
     return found;
+}
+
+// ── ZIP writer ───────────────────────────────────────────────────────────────────
+// Written by hand for the same reason make-icon-placeholders.mjs writes PNG by hand:
+// no dependencies, and the alternative did not work. `tar -a -c -f x.zip` picks the
+// format from the extension only in bsdtar; the `tar` on PATH in Git Bash / MSYS is GNU
+// tar, which does not know .zip and silently wrote a TAR archive under a .zip name. It
+// looked fine locally and was rejected on upload ("Upload is not a valid .zip archive"),
+// which is the worst possible place to find out.
+//
+// Timestamps are pinned to the DOS epoch (1980-01-01) instead of each file's mtime, so
+// the same sources always produce byte-identical bytes. The RnD portal stores web builds
+// content-addressed by sha256 and traces every APK to the sha it was built from, so a
+// reproducible archive means re-uploading an unchanged build is recognized as the same
+// bundle rather than piling up near-duplicate blobs.
+
+const CRC_TABLE = (() => {
+    const table = new Uint32Array(256);
+
+    for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        table[i] = c >>> 0;
+    }
+
+    return table;
+})();
+
+function crc32(buffer) {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < buffer.length; i++) crc = CRC_TABLE[(crc ^ buffer[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+const DOS_EPOCH_DATE = 0x0021; // 1980-01-01
+const DOS_EPOCH_TIME = 0x0000; // 00:00:00
+
+function writeZip(zipPath, dirPath) {
+    // Sorted so entry order depends on the file list alone, not on readdir order.
+    const files = collectFiles(dirPath)
+        .map((filePath) => ({ name: relative(dirPath, filePath).split(sep).join('/'), filePath }))
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+    // A store build is a few MB of assets; either limit means something upstream went very
+    // wrong, and a truncated field would produce a corrupt archive instead of an error.
+    if (files.length > 0xFFFF) {
+        throw new Error(`${files.length} entries exceeds the 65535 a non-ZIP64 archive can hold.`);
+    }
+
+    const locals = [];
+    const centrals = [];
+    let offset = 0;
+
+    for (const { name, filePath } of files) {
+        const nameBytes = Buffer.from(name, 'utf8');
+        const raw = readFileSync(filePath);
+        const deflated = deflateRawSync(raw, { level: 9 });
+        // Already-compressed assets (png/mp3/woff2) usually grow when deflated. Storing
+        // those keeps the archive smaller and costs the extractor nothing.
+        const stored = deflated.length >= raw.length;
+        const body = stored ? raw : deflated;
+
+        if (offset > 0xFFFFFFFF) {
+            throw new Error('Archive exceeds 4 GB, which needs ZIP64 — this writer does not emit it.');
+        }
+
+        const header = Buffer.alloc(30);
+        header.writeUInt32LE(0x04034B50, 0);           // local file header signature
+        header.writeUInt16LE(20, 4);                   // version needed (2.0 = deflate)
+        header.writeUInt16LE(0x0800, 6);               // flags: UTF-8 names
+        header.writeUInt16LE(stored ? 0 : 8, 8);       // method: store / deflate
+        header.writeUInt16LE(DOS_EPOCH_TIME, 10);
+        header.writeUInt16LE(DOS_EPOCH_DATE, 12);
+        header.writeUInt32LE(crc32(raw), 14);
+        header.writeUInt32LE(body.length, 18);         // compressed size
+        header.writeUInt32LE(raw.length, 22);          // uncompressed size
+        header.writeUInt16LE(nameBytes.length, 26);
+        header.writeUInt16LE(0, 28);                   // extra field length
+        locals.push(header, nameBytes, body);
+
+        const central = Buffer.alloc(46);
+        central.writeUInt32LE(0x02014B50, 0);          // central directory header signature
+        central.writeUInt16LE(0x031E, 4);              // version made by: 3.0, UNIX
+        central.writeUInt16LE(20, 6);
+        central.writeUInt16LE(0x0800, 8);
+        central.writeUInt16LE(stored ? 0 : 8, 10);
+        central.writeUInt16LE(DOS_EPOCH_TIME, 12);
+        central.writeUInt16LE(DOS_EPOCH_DATE, 14);
+        central.writeUInt32LE(crc32(raw), 16);
+        central.writeUInt32LE(body.length, 20);
+        central.writeUInt32LE(raw.length, 24);
+        central.writeUInt16LE(nameBytes.length, 28);
+        central.writeUInt16LE(0, 30);                  // extra field length
+        central.writeUInt16LE(0, 32);                  // file comment length
+        central.writeUInt16LE(0, 34);                  // disk number start
+        central.writeUInt16LE(0, 36);                  // internal attributes
+        // External attributes: regular file, 0644. The >>>0 is load-bearing — JS shifts are
+        // signed, and 0o100644 << 16 lands past 2^31 as a negative number.
+        central.writeUInt32LE((0o100644 << 16) >>> 0, 38);
+        central.writeUInt32LE(offset, 42);             // offset of the local header
+        centrals.push(central, nameBytes);
+
+        offset += header.length + nameBytes.length + body.length;
+    }
+
+    const centralBytes = Buffer.concat(centrals);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054B50, 0);                  // end of central directory signature
+    end.writeUInt16LE(0, 4);                           // this disk
+    end.writeUInt16LE(0, 6);                           // disk with the central directory
+    end.writeUInt16LE(files.length, 8);
+    end.writeUInt16LE(files.length, 10);
+    end.writeUInt32LE(centralBytes.length, 12);
+    end.writeUInt32LE(offset, 16);
+    end.writeUInt16LE(0, 20);                          // archive comment length
+
+    writeFileSync(zipPath, Buffer.concat([...locals, centralBytes, end]));
+    return files.length;
 }
 
 function platformParts() {
@@ -351,20 +469,20 @@ if (violations.length > 0) {
     process.exit(1);
 }
 
-// 7. Archive.
+// 7. Archive. See writeZip() for why this is not a shell-out.
+const zipPath = resolve(rootDir, target.zipPath);
+
 try {
-    const zipPath = resolve(rootDir, target.zipPath);
     mkdirSync(dirname(zipPath), { recursive: true });
 
-    // Removed first so a failed tar leaves no stale archive to be uploaded by mistake.
+    // Removed first so a failed write leaves no stale archive to be uploaded by mistake.
     rmSync(zipPath, { force: true });
 
-    // Relative to the output dir on purpose: an absolute Windows path starts with a
-    // drive-letter colon, which GNU tar (the one on PATH in a POSIX shell) reads as a
-    // remote host spec and refuses.
-    const zipArg = relative(outDir, zipPath).split(sep).join('/');
-    execSync(`tar -a -c -f "${zipArg}" *`, { cwd: outDir, stdio: 'inherit' });
-    console.log(`Created archive at ${relative(rootDir, zipPath).split(sep).join('/')}`);
+    const entries = writeZip(zipPath, outDir);
+    console.log(`Created archive at ${relative(rootDir, zipPath).split(sep).join('/')} (${entries} entries)`);
 } catch (error) {
+    // A half-written archive is worse than none: it is the one an upload would pick up.
+    rmSync(zipPath, { force: true });
     console.error('Failed to create zip archive:', error.message);
+    process.exit(1);
 }
