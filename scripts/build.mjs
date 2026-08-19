@@ -38,6 +38,10 @@ const GAME_LAYER_TOKENS = ['YandexSDK', 'RewardHub', 'AdsBridge', 'AdsManager', 
 
 const GATE_EXTENSIONS = ['.js', '.html', '.css', '.json'];
 
+// The name the sources are written with. A target that declares its own appName gets this
+// replaced with it across the built .js and .html — see renameApp().
+const SOURCE_APP_NAME = 'Block Chpok';
+
 // Vendored and minified: its mangled identifiers contain fragments that read as real
 // tokens (`ym(` and friends), so scanning it yields only false positives.
 const GATE_SKIP_FILES = ['pixi.min.js'];
@@ -63,13 +67,31 @@ const TARGETS = {
     },
     // Rewarded hub / native APK shell. No leaderboards at all: they are not part of that
     // contract, so shipping the UI would offer the player a board nothing can fill.
+    //
+    // The output is a DROP-IN for the shell product: it is copied over that repo's
+    // assets/www/ as is, so everything it would otherwise overwrite has to be produced
+    // here — the script tag pointing at the shell's own bridge, the legal containers,
+    // the store name. The only file of theirs it does not touch is rh-bridge.js itself.
+    //
+    // Consequence, and the reason no other target is shaped like this: the build has NO
+    // platform layer of its own. It runs only inside a host that provides rh-bridge.js,
+    // and must never be uploaded anywhere as a standalone web build.
     gameads: {
-        platform: ['core', 'gameads'],
+        platform: [],
+        // Both facades come from the host's bundle instead of a platform.js we write.
+        platformScript: 'rh-bridge.js',
         leaderboards: ['core'],
         yandexSdk: false,
+        // Store name of this build, substituted for the source name everywhere it appears:
+        // the <title>, the OpenGraph tag and the six I18N strings.
+        appName: 'Block Pop',
+        // Referenced by no source file; the shell has no use for 34 KB of nothing.
+        skipFiles: ['background.jpg'],
         outDir: 'build/gameads',
         zipPath: 'build/block_chpok-gameads.zip',
-        forbidden: ['YandexSDK', 'mc.yandex.ru', '/sdk.js'],
+        // SOURCE_APP_NAME is in the list so the gate proves the rename ran: a renamed build
+        // cannot still contain it, and a build that skipped the pass cannot get past here.
+        forbidden: ['YandexSDK', 'mc.yandex.ru', '/sdk.js', SOURCE_APP_NAME],
     },
     jam: {
         platform: ['core', 'jam'],
@@ -90,6 +112,14 @@ const target = TARGETS[targetName];
 
 if (!target) {
     console.error(`Unknown target "${targetName}". Known targets: ${Object.keys(TARGETS).join(', ')}.`);
+    process.exit(1);
+}
+
+// --sim registers the simulator INTO our platform layer. A target that has none would
+// silently get a platform.js holding nothing but the simulator, next to a script tag
+// pointing at the host's bridge — a build with two ad layers, one of them fake.
+if (withSim && target.platformScript) {
+    console.error(`--sim is not available for target "${targetName}": its platform layer is external (${target.platformScript}).`);
     process.exit(1);
 }
 
@@ -335,6 +365,32 @@ function tokensFor(filePath) {
     return tokens;
 }
 
+/**
+ * Rewrites the source app name to the target's own across the built .js and .html. A text
+ * pass rather than a constant the game reads: the name sits in six I18N strings and two
+ * meta tags, and threading a global through the game layer to carry it would put product
+ * branding into code that has to stay host-agnostic.
+ */
+function renameApp(appName) {
+    let files = 0;
+    let hits = 0;
+
+    for (const filePath of collectFiles(outDir)) {
+        if (!['.js', '.html'].includes(extname(filePath).toLowerCase())) continue;
+        if (GATE_SKIP_FILES.includes(basename(filePath))) continue;
+
+        const text = readFileSync(filePath, 'utf8');
+        const parts = text.split(SOURCE_APP_NAME);
+        if (parts.length === 1) continue;
+
+        writeFileSync(filePath, parts.join(appName));
+        files += 1;
+        hits += parts.length - 1;
+    }
+
+    return { files, hits };
+}
+
 function runTokenGate() {
     const violations = [];
 
@@ -382,6 +438,7 @@ mkdirSync(outDir, { recursive: true });
 //    wrapper only exists for a host that serves the SDK.
 const skipFromSource = new Set(['platform', 'leaderboards', 'platform.js', 'leaderboards.js']);
 if (!target.yandexSdk) skipFromSource.add('yandex-sdk.js');
+for (const fileName of target.skipFiles || []) skipFromSource.add(fileName);
 
 cpSync(sourceDir, outDir, {
     recursive: true,
@@ -427,7 +484,15 @@ if (!existsSync(indexPath)) {
 }
 
 let html = readFileSync(indexPath, 'utf8');
-html = replaceLayerBlock(html, 'platform', hasPlatform ? '<script src="platform.js"></script>' : null);
+// A target with an external platform layer wrote no platform.js — point the tag at the
+// host's bundle instead of dropping the block, or the game boots with no facades at all.
+const platformTag = hasPlatform
+    ? '<script src="platform.js"></script>'
+    : target.platformScript
+        ? `<script src="${target.platformScript}"></script>`
+        : null;
+
+html = replaceLayerBlock(html, 'platform', platformTag);
 html = replaceLayerBlock(html, 'leaderboards', hasLeaderboards ? '<script src="leaderboards.js"></script>' : null);
 html = applyOnlyBlocks(html, targetName);
 
@@ -450,12 +515,24 @@ for (const fileName of passthroughFiles) {
     }
 }
 
+// 6. Store name, before the gate: for a target that declares one the gate forbids the
+//    source name, which is what proves this pass ran.
+const renamed = target.appName ? renameApp(target.appName) : null;
+
 console.log(
     `Built target "${targetName}": ${countFiles(outDir)} files in ${outLabel} ` +
-    `(platform: ${parts.join(' + ')}; leaderboards: ${leaderboardParts.join(' + ') || 'none'}).`
+    `(platform: ${parts.join(' + ') || `external: ${target.platformScript}`}; ` +
+    `leaderboards: ${leaderboardParts.join(' + ') || 'none'}).`
 );
 
-// 6. Token gate. Fails the build before anything uploadable exists.
+if (renamed) {
+    console.log(
+        `Renamed "${SOURCE_APP_NAME}" to "${target.appName}": ` +
+        `${renamed.hits} occurrence(s) in ${renamed.files} file(s).`
+    );
+}
+
+// 7. Token gate. Fails the build before anything uploadable exists.
 const violations = runTokenGate();
 
 if (violations.length > 0) {
@@ -469,7 +546,7 @@ if (violations.length > 0) {
     process.exit(1);
 }
 
-// 7. Archive. See writeZip() for why this is not a shell-out.
+// 8. Archive. See writeZip() for why this is not a shell-out.
 const zipPath = resolve(rootDir, target.zipPath);
 
 try {

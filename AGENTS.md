@@ -52,9 +52,29 @@ resolves the marker blocks in `index.html`, runs the token gate and zips the res
 |---|---|---|---|---|
 | `npm run build` | `web` | public site | no host | `dist/` |
 | `npm run build:yandex` | `yandex` | Yandex Games | Yandex | `build/yandex/` |
-| `npm run build:gameads` | `gameads` | native APK shell | **none** | `build/gameads/` |
+| `npm run build:gameads` | `gameads` | native APK shell | **none** | `build/gameads/` (drop-in, see below) |
 | `npm run build:jam` | `jam` | MY.GAMES JAM portal | portal | `build/jam/` |
 | `npm run build:all` | all three platform targets | | | `build/` |
+
+**`gameads` is a drop-in, not a standalone build.** Its output is copied verbatim over the
+shell product's `android/app/src/main/assets/www/`, so the build has to produce everything it
+would otherwise overwrite there — and it is the only target with no platform layer of its own:
+
+- `platform: []` plus `platformScript: 'rh-bridge.js'` — no `platform.js` is written, and the
+  `build:platform` block collapses to a tag pointing at the host's own bundle, which defines
+  `GameAds` / `GamePlatform`. **Never upload this build as a standalone web build:** outside
+  that host nothing defines the facades and the game boots dead. `--sim` is refused for the
+  same reason.
+- `appName` renames `Block Chpok` to the store name across the built `.js` and `.html` (the
+  `<title>`, the OpenGraph tag, six I18N strings). The gate lists the source name as forbidden,
+  which is what proves the pass ran.
+- `skipFiles` drops assets the host has no use for.
+- `<!-- build:only gameads -->` blocks in `index.html` carry the host's `[data-rh-legal]`
+  containers — its consent script fills them, and without them a store build ships no privacy
+  entry points.
+
+Keep it copy-clean: after `npm run build:gameads`, `build/gameads/` should differ from that
+repo's `www/` in comment text only. Anything else is a regression they will have to re-patch.
 
 Rules that are easy to break:
 

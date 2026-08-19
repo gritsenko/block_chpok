@@ -9,7 +9,9 @@
     <meta property="og:description" content="A playful block puzzle game">
     <meta property="og:image" content="og.jpg">
     <meta property="og:type" content="website">
+    <!-- build:only web,yandex,jam -->
     <meta property="og:url" content="https://gritsenko.biz/block_chpok/">
+    <!-- /build:only -->
     <meta name="twitter:card" content="summary_large_image">
 
     <!-- build:platform -->
@@ -67,6 +69,11 @@
                 <span class="splash-mode-sub" id="splash-classic-sub"></span>
             </button>
             <button class="splash-ghost-btn" id="splash-leaderboard-btn" type="button" disabled>Leaderboard</button>
+            <!-- build:only gameads -->
+            <!-- Filled by the host's legal script. Inside splash-modes, not splash-content:
+                 that one has pointer-events off. -->
+            <div data-rh-legal="splash"></div>
+            <!-- /build:only -->
         </div>
     </div>
 </div>
@@ -153,6 +160,10 @@
                 <button class="btn btn-outline settings-action-btn" id="settings-leaderboard-btn" type="button">Leaderboard</button>
                 <button class="btn btn-outline settings-action-btn" id="settings-menu-btn" type="button">Main menu</button>
             </div>
+            <!-- build:only gameads -->
+            <!-- Filled by the host's legal script; see the splash container above. -->
+            <div data-rh-legal="settings"></div>
+            <!-- /build:only -->
         </div>
     </div>
 

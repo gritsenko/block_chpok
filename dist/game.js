@@ -996,7 +996,7 @@ let pendingRewardShapes = null;
 const INTERSTITIAL_EVERY_N_GAMES = 3;                 // показываем не чаще, чем каждый 3-й рестарт
 const INTERSTITIAL_MIN_SESSION_MS = 30 * 1000;        // только после достаточно долгой партии
 const INTERSTITIAL_MIN_INTERVAL_MS = 2 * 60 * 1000;   // и если рекламы не было пару минут
-const INTERSTITIAL_FALLBACK_MS = 8000;                // страховка, если провайдер «молчит»
+const INTERSTITIAL_FALLBACK_MS = 45000;               // страховка на случай зависшего провайдера
 let gamesSinceInterstitial = 0;
 let skipNextInterstitial = false;                     // выставляется после возрождения за rewarded
 let lastInterstitialAtMs = 0;
@@ -1837,12 +1837,25 @@ function renderRewardShapes(shapes) {
     shapes.forEach(piece => {
         const slot = document.createElement('div');
         slot.className = 'reward-shape-slot';
+        // Слот добавляется в DOM ДО расчётов: размер ячейки считается от его реальной ширины.
+        // Модалка здесь ещё visibility:hidden, но уже разложена, так что метрики настоящие.
+        secondChanceShapesEl.appendChild(slot);
 
         const rows = piece.matrix.length;
         const cols = piece.matrix[0].length;
         const gap = 2;
+        const padding = 6;
 
-        const trayCellSize = 16; // Фиксированный размер ячейки для предпросмотра
+        // Размер ячейки ВЫЧИСЛЯЕТСЯ под слот, а не задан константой. Раньше здесь стояли
+        // фиксированные 16px: полоска 1x5 или 5x1 рендерилась 88px шириной в слоте 60px,
+        // вылезала наружу и накрывала кнопку «Посмотреть». Воспроизводилось не всегда —
+        // только когда в награду попадала длинная фигура, а на забитом поле
+        // getAllPossibleShapes() оставляет в основном полоски.
+        const inner = Math.max(16, (slot.clientWidth || 60) - padding * 2);
+        const trayCellSize = Math.max(4, Math.floor(Math.min(
+            (inner - (cols - 1) * gap) / cols,
+            (inner - (rows - 1) * gap) / rows
+        )));
 
         const container = document.createElement('div');
         container.innerHTML = createShapeHTML(piece, false);
@@ -1853,10 +1866,19 @@ function renderRewardShapes(shapes) {
 
         shapeEl.style.width = `${w}px`;
         shapeEl.style.height = `${h}px`;
+        // У .shape по умолчанию gap: 3px — выставляем тот же gap, из которого посчитаны w/h,
+        // иначе колонки сетки не совпадут с вычисленным размером.
+        shapeEl.style.gap = `${gap}px`;
+        // Треки сетки в ПИКСЕЛЯХ, а не repeat(N, 1fr), который отдаёт createShapeHTML. На
+        // старом WebView (в BlueStacks едет Chrome 101) 1fr вместе с aspect-ratio:1/1 на
+        // .block разрешается вырожденно: колонка забирает весь размер фигуры вместо доли,
+        // блоки распирает и обрезает по overflow. Текущий Chrome ту же разметку раскладывает
+        // верно — поэтому баг ловился только на устройстве.
+        shapeEl.style.gridTemplateColumns = `repeat(${cols}, ${trayCellSize}px)`;
+        shapeEl.style.gridTemplateRows = `repeat(${rows}, ${trayCellSize}px)`;
         shapeEl.style.transform = 'none';
 
         slot.appendChild(shapeEl);
-        secondChanceShapesEl.appendChild(slot);
     });
 }
 
@@ -2534,6 +2556,12 @@ function renderTray(forceEmpty = false, popIndexes = null) {
             shapeEl.classList.add('tray-shape');
             shapeEl.style.width = `${w}px`;
             shapeEl.style.height = `${h}px`;
+            // Пиксельные треки вместо 1fr — см. комментарий в renderRewardShapes: на старом
+            // WebView 1fr + aspect-ratio разрешается вырожденно. Размер ячейки здесь известен
+            // точно, поэтому фиксируем его и убираем саму возможность.
+            shapeEl.style.gap = `${gap}px`;
+            shapeEl.style.gridTemplateColumns = `repeat(${cols}, ${trayCellSize}px)`;
+            shapeEl.style.gridTemplateRows = `repeat(${rows}, ${trayCellSize}px)`;
 
             slot.appendChild(shapeEl);
             slot.onpointerdown = e => startDrag(e, i);
@@ -2569,6 +2597,12 @@ function startDrag(e, index) {
     const shapeEl = dragElement.firstElementChild;
     shapeEl.style.width = `${piece.matrix[0].length * cellSize + (piece.matrix[0].length - 1) * gapSize}px`;
     shapeEl.style.height = `${piece.matrix.length * cellSize + (piece.matrix.length - 1) * gapSize}px`;
+    // Пиксельные треки вместо 1fr (см. renderRewardShapes). Здесь это ещё и про точность
+    // дропа: клон должен лежать на той же сетке, из которой getBoardCoordinates берёт
+    // целевую клетку.
+    shapeEl.style.gap = `${gapSize}px`;
+    shapeEl.style.gridTemplateColumns = `repeat(${piece.matrix[0].length}, ${cellSize}px)`;
+    shapeEl.style.gridTemplateRows = `repeat(${piece.matrix.length}, ${cellSize}px)`;
 
     // ОПТИМИЗАЦИЯ: фиксируем left/top один раз, далее двигаем только transform
     dragElement.style.left = '0px';
@@ -3729,9 +3763,11 @@ function showInterstitialThen(next) {
     audioManager.suspend().catch(() => { });
 
     let done = false;
+    let fallbackTimeoutId = 0;
     const proceed = (wasShown) => {
         if (done) return;
         done = true;
+        if (fallbackTimeoutId) clearTimeout(fallbackTimeoutId);
         isInterstitialInFlight = false;
 
         if (wasShown) {
@@ -3749,8 +3785,11 @@ function showInterstitialThen(next) {
         onClose: (wasShown) => { proceed(wasShown); },
     });
 
-    // Страховка на случай, если провайдер не вызовет колбэки.
-    setTimeout(() => proceed(false), INTERSTITIAL_FALLBACK_MS);
+    // Страховка на случай, если провайдер вообще не вызовет колбэки. Таймаут намеренно
+    // длиннее любой реальной рекламы: прежние 8 секунд срабатывали ПОСЕРЕДИНЕ ещё идущего
+    // ролика — игра рестартовала за ним, показ не засчитывался, а следующий рестарт ловил
+    // ещё один interstitial.
+    fallbackTimeoutId = setTimeout(() => proceed(false), INTERSTITIAL_FALLBACK_MS);
 }
 
 // Общий шлюз межстраничной рекламы для обоих режимов: классика зовёт его на «Заново»,
@@ -3789,8 +3828,9 @@ restartBtn.addEventListener('click', handleRestartClick);
 if (secondChanceAdBtn) {
     secondChanceAdBtn.addEventListener('click', () => {
         if (!window.GameAds || !window.GameAds.hasProvider()) {
-            // Фолбэк, если рекламные провайдеры недоступны
-            window.open('https://gritsenko.biz', '_blank');
+            // Фолбэк, если рекламных провайдеров нет (браузер или APK без :wrapper-ads):
+            // просто выдаём второй шанс. Прежний фолбэк открывал внешний сайт, а это внутри
+            // APK выбрасывает игрока в браузер, поэтому он убран.
             applySecondChanceReward();
             return;
         }
