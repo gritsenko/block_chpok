@@ -15,6 +15,7 @@
     <meta name="twitter:card" content="summary_large_image">
 
     <!-- build:only gameads -->
+    <meta name="game-modes" content="adventure">
     <!-- Native shell assets are bundled locally. Keep the policy before scripts so
          injected remote code cannot access the bridge; Pixi texture workers need blob:. -->
     <meta http-equiv="Content-Security-Policy"
@@ -71,10 +72,12 @@
                 <span class="splash-mode-title" id="splash-adventure-title">Adventure</span>
                 <span class="splash-mode-sub" id="splash-adventure-sub"></span>
             </button>
+            <!-- build:only web,yandex,jam -->
             <button class="splash-mode-btn splash-mode-classic" id="splash-play-btn" type="button" disabled>
                 <span class="splash-mode-title" id="splash-classic-title">Classic</span>
                 <span class="splash-mode-sub" id="splash-classic-sub"></span>
             </button>
+            <!-- /build:only -->
             <button class="splash-ghost-btn" id="splash-leaderboard-btn" type="button" disabled>Leaderboard</button>
             <!-- build:only gameads -->
             <!-- Filled by the host's legal script. Inside splash-modes, not splash-content:

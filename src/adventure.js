@@ -1576,16 +1576,18 @@
             }));
         }
 
-        // Жизни кончились — не выгоняем игрока из игры, а отправляем в классику.
-        actions.appendChild(button('btn btn-outline adv-cta', dict.playClassic, () => {
-            closeModal();
-            closeMap();
-            finishRun();
-            // Без перерисовки уровень/ходы и цели остались бы висеть в шапке классики.
-            renderHud();
-            renderBoosters();
-            if (core()) core().startGame({ mode: core().MODE_ENDLESS });
-        }));
+        // Жизни кончились — предлагаем классику только в сборках, где она доступна.
+        if (core() && core().isClassicEnabled()) {
+            actions.appendChild(button('btn btn-outline adv-cta', dict.playClassic, () => {
+                closeModal();
+                closeMap();
+                finishRun();
+                // Без перерисовки уровень/ходы и цели остались бы висеть в шапке классики.
+                renderHud();
+                renderBoosters();
+                if (core()) core().startGame({ mode: core().MODE_ENDLESS });
+            }));
+        }
 
         actions.appendChild(button('btn btn-outline adv-cta', dict.map, () => {
             closeModal();

@@ -894,6 +894,8 @@ const SHAPES_DATA = [
 // приключения живёт в adventure.js, данные уровней — в levels.js.
 const MODE_ENDLESS = 'endless';
 const MODE_ADVENTURE = 'adventure';
+// A build may expose only level progression while retaining both modes in the sources.
+const ADVENTURE_ONLY = document.querySelector('meta[name="game-modes"]')?.content === MODE_ADVENTURE;
 
 // Слой препятствий поверх board. board[r][c] — цвет блока (или null), а
 // obstacles[r][c] — { type, hp } / null. Слои независимы, поэтому старый
@@ -1282,7 +1284,7 @@ function applyTranslations(language) {
     const classicTitleEl = document.getElementById('splash-classic-title');
     const adventureTitleEl = document.getElementById('splash-adventure-title');
     if (classicTitleEl) classicTitleEl.textContent = messages.modeClassic;
-    if (adventureTitleEl) adventureTitleEl.textContent = messages.modeAdventure;
+    if (adventureTitleEl) adventureTitleEl.textContent = ADVENTURE_ONLY ? 'PLAY' : messages.modeAdventure;
     if (splashLeaderboardBtn) splashLeaderboardBtn.textContent = messages.leaderboardTitle;
     if (menuBtn) menuBtn.textContent = messages.backToMenu;
     if (settingsLeaderboardBtn) settingsLeaderboardBtn.textContent = messages.leaderboardTitle;
@@ -3634,6 +3636,7 @@ function handleGlobalKeydown(event) {
 async function startGame(options) {
     const opts = options || {};
     const nextMode = opts.mode === MODE_ADVENTURE ? MODE_ADVENTURE : MODE_ENDLESS;
+    if (ADVENTURE_ONLY && nextMode !== MODE_ADVENTURE) return;
 
     splashOverlay.classList.add('hidden');
     closeSettingsModal();
@@ -4024,6 +4027,7 @@ window.GameCore = {
 
     // Управление партией
     startGame: startGame,
+    isClassicEnabled: () => !ADVENTURE_ONLY,
     returnToModeSelect: returnToModeSelect,
     getMode: () => gameMode,
     getScore: () => score,
