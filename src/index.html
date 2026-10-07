@@ -14,6 +14,13 @@
     <!-- /build:only -->
     <meta name="twitter:card" content="summary_large_image">
 
+    <!-- build:only gameads -->
+    <!-- Native shell assets are bundled locally. Keep the policy before scripts so
+         injected remote code cannot access the bridge; Pixi texture workers need blob:. -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'none'">
+    <!-- /build:only -->
+
     <!-- build:platform -->
     <!-- Platform facade: host-agnostic core plus one self-registering adapter per host.
          The core detects which host is actually present and only then lets that adapter
