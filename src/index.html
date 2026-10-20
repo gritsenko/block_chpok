@@ -64,6 +64,7 @@
 <body>
 
 <div class="splash-overlay" id="splash-overlay">
+    <button class="settings-btn splash-settings-btn" id="splash-settings-btn" type="button" aria-label="Open settings" disabled></button>
     <div class="splash-content">
         <!-- Выбор режима. Скрыт инлайновым display:none до того, как game.js
              отправит LoadingAPI.ready() и включит панель (требование 1.19). -->
@@ -79,11 +80,6 @@
             </button>
             <!-- /build:only -->
             <button class="splash-ghost-btn" id="splash-leaderboard-btn" type="button" disabled>Leaderboard</button>
-            <!-- build:only gameads -->
-            <!-- Filled by the host's legal script. Inside splash-modes, not splash-content:
-                 that one has pointer-events off. -->
-            <div data-rh-legal="splash"></div>
-            <!-- /build:only -->
         </div>
     </div>
 </div>
@@ -150,6 +146,29 @@
 
     <div class="game-state-overlay" id="game-state-overlay" aria-hidden="true"></div>
 
+    <div id="game-over" aria-live="polite">
+        <h2 id="game-over-title">Game Over!</h2>
+        <div class="game-over-stats">
+            <div><span id="game-over-score-label">Score:</span> <strong id="game-over-score">0</strong></div>
+            <div><span id="game-over-best-label">Best:</span> <strong id="game-over-best">0</strong></div>
+        </div>
+        <button class="btn btn-yellow restart-btn" id="restart-btn" type="button">Play Again</button>
+    </div>
+
+    <div id="second-chance-modal" aria-live="polite">
+        <h2 id="second-chance-title">No moves!</h2>
+        <p id="second-chance-text">Watch an ad to get a new set of shapes?</p>
+        <div id="second-chance-shapes" class="reward-shapes-container"></div>
+        <div class="second-chance-actions">
+            <button class="btn btn-yellow second-chance-btn" id="second-chance-ad-btn" type="button">Watch Ad</button>
+            <button class="btn btn-outline second-chance-btn" id="second-chance-skip-btn" type="button">No thanks</button>
+        </div>
+    </div>
+
+    <button id="debug-gameover-btn" class="btn btn-outline" style="display: none; position: fixed; bottom: 10px; right: 10px; z-index: 9999; padding: 10px; font-size: 12px; background: rgba(0,0,0,0.5); width: auto;">Debug Game Over</button>
+    <button id="debug-lang-btn" class="btn btn-outline" style="display: none; position: fixed; bottom: 10px; left: 10px; z-index: 9999; padding: 10px; font-size: 12px; background: rgba(0,0,0,0.5); width: auto;">Lang: EN</button>
+</div>
+
     <div class="modal-overlay" id="settings-modal" aria-hidden="true">
         <div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
             <div class="settings-modal-header">
@@ -171,34 +190,11 @@
                 <button class="btn btn-outline settings-action-btn" id="settings-menu-btn" type="button">Main menu</button>
             </div>
             <!-- build:only gameads -->
-            <!-- Filled by the host's legal script; see the splash container above. -->
+            <!-- Legal documents and consent controls are available only in settings. -->
             <div data-rh-legal="settings"></div>
             <!-- /build:only -->
         </div>
     </div>
-
-    <div id="game-over" aria-live="polite">
-        <h2 id="game-over-title">Game Over!</h2>
-        <div class="game-over-stats">
-            <div><span id="game-over-score-label">Score:</span> <strong id="game-over-score">0</strong></div>
-            <div><span id="game-over-best-label">Best:</span> <strong id="game-over-best">0</strong></div>
-        </div>
-        <button class="btn btn-yellow restart-btn" id="restart-btn" type="button">Play Again</button>
-    </div>
-
-    <div id="second-chance-modal" aria-live="polite">
-        <h2 id="second-chance-title">No moves!</h2>
-        <p id="second-chance-text">Watch an ad to get a new set of shapes?</p>
-        <div id="second-chance-shapes" class="reward-shapes-container"></div>
-        <div class="second-chance-actions">
-            <button class="btn btn-yellow second-chance-btn" id="second-chance-ad-btn" type="button">Watch Ad</button>
-            <button class="btn btn-outline second-chance-btn" id="second-chance-skip-btn" type="button">No thanks</button>
-        </div>
-    </div>
-    
-    <button id="debug-gameover-btn" class="btn btn-outline" style="display: none; position: fixed; bottom: 10px; right: 10px; z-index: 9999; padding: 10px; font-size: 12px; background: rgba(0,0,0,0.5); width: auto;">Debug Game Over</button>
-    <button id="debug-lang-btn" class="btn btn-outline" style="display: none; position: fixed; bottom: 10px; left: 10px; z-index: 9999; padding: 10px; font-size: 12px; background: rgba(0,0,0,0.5); width: auto;">Lang: EN</button>
-</div>
 
 <!-- PixiJS (вендорный, офлайн) + WebGL-рендерер игрового поля. Должны загрузиться ДО game.js. -->
 <script src="pixi.min.js"></script>

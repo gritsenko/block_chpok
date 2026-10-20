@@ -1120,6 +1120,7 @@ const splashOverlay = document.getElementById('splash-overlay');
 const splashLogoEl = document.getElementById('splash-logo');
 const headerLogoEl = document.getElementById('header-logo');
 const settingsBtn = document.getElementById('settings-btn');
+const splashSettingsBtn = document.getElementById('splash-settings-btn');
 const settingsModal = document.getElementById('settings-modal');
 const settingsTitleEl = document.getElementById('settings-title');
 const settingsCloseBtn = document.getElementById('settings-close-btn');
@@ -1188,6 +1189,13 @@ function handlePixiContextRestored() {
 initPixiRenderer();
 
 function updateSplashPlayButtonPosition() {
+    if (splashSettingsBtn && settingsBtn) {
+        const rect = settingsBtn.getBoundingClientRect();
+        splashSettingsBtn.style.left = `${rect.left}px`;
+        splashSettingsBtn.style.top = `${rect.top}px`;
+        splashSettingsBtn.style.width = `${rect.width}px`;
+        splashSettingsBtn.style.height = `${rect.height}px`;
+    }
     if (!splashModesEl || !boardEl) return;
 
     const boardRect = boardEl.getBoundingClientRect();
@@ -1300,6 +1308,7 @@ function applyTranslations(language) {
     settingsTitleEl.textContent = messages.settingsTitle;
     musicToggleLabelEl.textContent = messages.soundLabel;
     settingsBtn.setAttribute('aria-label', messages.openSettings);
+    if (splashSettingsBtn) splashSettingsBtn.setAttribute('aria-label', messages.openSettings);
     settingsCloseBtn.setAttribute('aria-label', messages.closeSettings);
     if (splashLogoEl) splashLogoEl.alt = messages.splashLogoAlt;
     if (headerLogoEl) headerLogoEl.alt = messages.headerLogoAlt;
@@ -1569,7 +1578,7 @@ function setSplashPlayEnabled(enabled) {
         splashModesEl.setAttribute('aria-hidden', isSplashPlayEnabled ? 'false' : 'true');
     }
 
-    [splashPlayBtn, splashAdventureBtn, splashLeaderboardBtn].forEach(btn => {
+    [splashPlayBtn, splashAdventureBtn, splashLeaderboardBtn, splashSettingsBtn].forEach(btn => {
         if (!btn) return;
         btn.disabled = !isSplashPlayEnabled;
     });
@@ -3901,6 +3910,8 @@ function applySecondChanceReward() {
 }
 
 settingsBtn.addEventListener('click', openSettingsModal);
+// Share the regular entry point, including the host's settings refresh listeners.
+if (splashSettingsBtn) splashSettingsBtn.addEventListener('click', () => settingsBtn.click());
 settingsCloseBtn.addEventListener('click', closeSettingsModal);
 musicToggle.addEventListener('change', event => {
     setSoundPreference(Boolean(event.target.checked));

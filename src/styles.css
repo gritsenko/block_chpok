@@ -1223,6 +1223,15 @@ body.low-perf-effects .praise-popup {
     font-family: 'Nunito', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+/* The splash owns its settings entry; the dialog itself sits above both screen layers. */
+.splash-settings-btn {
+    position: fixed;
+}
+
+.splash-overlay:not(.hidden) ~ .game-container .header > .settings-btn {
+    visibility: hidden;
+}
+
 /* ============================================================
    ВЫБОР РЕЖИМА НА СПЛЕШЕ
    Панель позиционируется из JS в центр доски (updateSplashPlayButtonPosition).
